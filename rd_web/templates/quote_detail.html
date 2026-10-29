@@ -1,0 +1,277 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-head">
+<div>
+<div class="eyebrow">
+<a href="{{ url_for('quote_list') }}">Quotations</a> / #{{ quote.id }}</div>
+<h1>Quotation #{{ quote.id }}</h1>
+<p class="subhead">{{ quote.client_name }} · {{ quote.kind|replace('_',' ') }} · revision {{ version.revision }}</p>
+</div>
+<span class="pill {{ 'amber' if version.status == 'Sent' else 'green' if version.status == 'Accepted' else 'blue' }}">{{ version.status }}</span>
+</div>
+<div class="quote-grid">
+<div class="stack">
+  {% if version.status == 'Draft' and can('quotations.price_edit') %}<section class="card">
+<div class="card-head">
+<div>
+<h2>Prepare quotation</h2>
+{% if quote.kind == 'chemical' %}<p class="card-sub">Build the selling price from the recipe, current costs and target gross margin.</p>
+{% else %}<p class="card-sub">Enter the total client-facing selling price and commercial terms.</p>{% endif %}
+</div>
+</div>
+<form class="card-body" method="post" action="{{ url_for('save_quote_draft', quote_id=quote.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+{% if quote.kind == 'chemical' and not recipes %}<div class="notice amber">No recipe versions are configured. Ask an Admin/Owner to add a recipe in Products &amp; Costing before pricing this chemical draft.</div>{% endif %}
+{% if quote.kind == 'chemical' and not show_costs %}<div class="notice small">Select the recipe and pricing inputs below. Ingredient rates, supplier invoices and internal cost totals remain restricted.</div>{% endif %}
+<div class="form-grid">
+<div class="field">
+<label for="q-quantity">Quote quantity *</label>
+<input id="q-quantity" name="quantity" value="{{ snapshot.get('quantity','') }}" required>
+</div>
+<div class="field">
+<label for="q-unit">Sale unit *</label>
+<input id="q-unit" name="unit" value="{{ snapshot.get('unit','') }}" required>
+</div>
+    {% if quote.kind == 'chemical' %}<div class="field">
+<label for="q-recipe">Recipe version *</label>
+<select id="q-recipe" name="recipe_id" required>
+<option value="">Choose recipe</option>{% for row in recipes %}<option value="{{ row.id }}" {{ 'selected' if snapshot.get('recipe_id') == row.id else '' }}>{{ row.name }} v{{ row.version }} · {{ 'active' if row.active else 'inactive' }}</option>{% endfor %}</select>
+<small class="field-help">Recipe versions are used for estimates only. No production or stock movement.</small>
+</div>
+<div class="field">
+<label for="q-asof">Cost as of *</label>
+<input id="q-asof" name="cost_as_of" type="date" value="{{ snapshot.get('cost_as_of') or today }}" required>
+</div>
+<div class="field">
+<label for="q-margin">Gross margin % *</label>
+<input id="q-margin" name="margin_percent" type="number" min="0" max="99.99" step="0.01" list="margin-options" value="{{ snapshot.get('gross_margin') * 100 if snapshot.get('gross_margin') is not none else '' }}" placeholder="e.g. 20" required>
+<datalist id="margin-options">{% for margin in margins %}<option value="{{ margin * 100 }}"></option>{% endfor %}</datalist>
+</div>
+<div class="field">
+<label for="q-processing">Processing cost *</label>
+<input id="q-processing" name="processing" value="{{ snapshot.get('processing_cost') if snapshot.get('processing_cost') is not none else '' }}" placeholder="Enter 0 if none">
+</div>
+<div class="field">
+<label for="q-processing-currency">Processing currency *</label>
+<select id="q-processing-currency" name="processing_currency">
+{% set processing_currency = snapshot.get('processing_currency') or snapshot.get('basis_currency') or snapshot.get('quote_currency') or 'INR' %}
+<option {{ 'selected' if processing_currency == 'INR' else '' }}>INR</option>
+<option {{ 'selected' if processing_currency == 'USD' else '' }}>USD</option>
+</select>
+</div>
+<div class="field">
+<label for="q-freight">Applicable freight *</label>
+<input id="q-freight" name="freight" value="{{ snapshot.get('freight_cost') if snapshot.get('freight_cost') is not none else '' }}" placeholder="Enter 0 if none">
+</div>
+<div class="field">
+<label for="q-freight-currency">Freight currency *</label>
+<select id="q-freight-currency" name="freight_currency">
+{% set freight_currency = snapshot.get('freight_currency') or snapshot.get('basis_currency') or snapshot.get('quote_currency') or 'INR' %}
+<option {{ 'selected' if freight_currency == 'INR' else '' }}>INR</option>
+<option {{ 'selected' if freight_currency == 'USD' else '' }}>USD</option>
+</select>
+</div>
+<div class="field full">
+<span class="field-help">Processing and freight may each be INR or USD. One dated INR/USD rate converts every component into the quote currency before gross margin is applied. Keep tax and already included invoice charges out of these fields.</span>
+</div>{% if items %}<div class="field full">
+<label>Dated manual overrides (select intentionally)</label>
+<div class="badge-row">{% for item in items %}<label class="pill">
+<input type="checkbox" name="override_items" value="{{ item.id }}"> {{ item.display_name }}</label>{% endfor %}</div>
+<small class="field-help">Add an override under Products & Costing first. Selecting an item uses its latest dated override.</small>
+</div>{% endif %}
+    {% else %}<div class="field">
+<label for="q-manual">Total selling price *</label>
+<input id="q-manual" name="manual_price" value="{{ snapshot.get('selling_price') or '' }}">
+</div>{% endif %}
+    <div class="field">
+<label for="q-currency">Quote currency</label>
+<select id="q-currency" name="quote_currency">
+<option {{ 'selected' if snapshot.get('quote_currency') == 'INR' else '' }}>INR</option>
+<option {{ 'selected' if snapshot.get('quote_currency') == 'USD' else '' }}>USD</option>
+</select>
+</div>{% if quote.kind == 'chemical' %}<div class="field">
+<label for="q-fx-rate">Exchange rate (if converting)</label>
+<input id="q-fx-rate" name="fx_rate" value="{{ snapshot.get('fx',{}).get('rate','') }}">
+</div>
+<div class="field">
+<label for="q-fx-direction">Exchange direction</label>
+<select id="q-fx-direction" name="fx_direction">
+<option value="">No conversion</option>
+<option value="INR_per_USD" {{ 'selected' if snapshot.get('fx',{}).get('direction') == 'INR_per_USD' else '' }}>INR per USD</option>
+<option value="USD_per_INR" {{ 'selected' if snapshot.get('fx',{}).get('direction') == 'USD_per_INR' else '' }}>USD per INR</option>
+</select>
+</div>
+<div class="field">
+<label for="q-fx-date">Exchange-rate date</label>
+<input id="q-fx-date" name="fx_date" type="date" value="{{ snapshot.get('fx',{}).get('date') or today }}">
+</div>{% endif %}<div class="field">
+<label for="q-payment">Payment terms *</label>
+<input id="q-payment" name="payment_terms" value="{{ snapshot.get('payment_terms','') }}">
+</div>
+<div class="field">
+<label for="q-delivery">Delivery terms *</label>
+<input id="q-delivery" name="delivery_terms" value="{{ snapshot.get('delivery_terms','') }}">
+</div>
+<div class="field">
+<label for="q-destination">Destination *</label>
+<input id="q-destination" name="destination" value="{{ snapshot.get('destination','') }}">
+</div>
+<div class="field">
+<label for="q-validity">Valid through *</label>
+<input id="q-validity" type="date" name="validity_date" value="{{ snapshot.get('validity_date') or today }}">
+</div>
+</div>
+<div class="form-actions">
+<button class="btn primary" type="submit">Save draft and calculate</button>
+</div>
+</form>
+</section>{% endif %}
+  <section class="card">
+<div class="card-head">
+<div>
+<h2>Frozen quotation snapshot</h2>
+<p class="card-sub">This revision keeps its saved price and terms unchanged even after later updates.</p>
+</div>
+</div>
+<div class="card-body">
+{% if quote.kind == 'chemical' and show_costs %}
+{% if snapshot.get('pricing_basis') == 'manual_commercial' and not snapshot.get('cost_snapshot') %}<p class="muted-note">The selling price was entered manually; no internal cost calculation is stored for this draft.</p>
+{% elif snapshot.get('cost_snapshot') %}<div class="table-wrap">
+<table class="cost-table">
+<thead>
+<tr>
+<th>Ingredient / packaging</th>
+<th>Latest source</th>
+<th class="right">Qty</th>
+<th class="right">Rate</th>
+<th class="right">Cost</th>
+</tr>
+</thead>
+<tbody>{% for line in snapshot.cost_snapshot.lines %}<tr>
+<td>
+<div class="cell-title">{{ line.item }}</div>
+<div class="cell-sub">{{ line.category }}</div>
+</td>
+<td>{% if line.cost.status == 'ok' %}<div>{{ line.cost.get('invoice','Manual override') }} · {{ line.cost.get('supplier','') }}</div>
+<div class="cell-sub">{{ line.cost.date }} · {{ line.cost.currency }} ({{ line.cost.get('currency_provenance','manual override')|replace('_',' ') }}) · {{ line.cost.unit }} · {{ line.cost.basis|replace('_',' ') }}</div>{% else %}<span class="pill amber">{{ line.cost.status|replace('_',' ') }}</span>{% endif %}</td>
+<td class="right code">{{ line.quantity }} {{ line.unit }}</td>
+<td class="right code">{{ line.cost.get('recipe_unit_rate','—') }}</td>
+<td class="right code">{{ line.get('total','—') }}</td>
+</tr>{% endfor %}</tbody>
+</table>
+</div>{% else %}<p class="muted-note">Save the draft to calculate the cost snapshot.</p>{% endif %}<div class="drawer-section">
+<div class="single-metric">
+<span>Ingredients</span>
+<strong>{{ snapshot.get('ingredient_cost') if snapshot.get('ingredient_cost') is not none else 'Unresolved' }} {{ snapshot.get('basis_currency') or '' }}</strong>
+{% if snapshot.get('ingredient_cost_quote') is not none and snapshot.get('basis_currency') != snapshot.get('quote_currency') %}<small class="field-help">{{ snapshot.get('ingredient_cost_quote') }} {{ snapshot.get('quote_currency') }} after FX</small>{% endif %}
+</div>
+<div class="single-metric">
+<span>Packaging</span>
+<strong>{{ snapshot.get('packaging_cost') if snapshot.get('packaging_cost') is not none else 'Unresolved' }} {{ snapshot.get('basis_currency') or '' }}</strong>
+{% if snapshot.get('packaging_cost_quote') is not none and snapshot.get('basis_currency') != snapshot.get('quote_currency') %}<small class="field-help">{{ snapshot.get('packaging_cost_quote') }} {{ snapshot.get('quote_currency') }} after FX</small>{% endif %}
+</div>
+<div class="single-metric">
+<span>Processing</span>
+<strong>{{ snapshot.get('processing_cost') if snapshot.get('processing_cost') is not none else 'Unresolved' }} {{ snapshot.get('processing_currency') or snapshot.get('basis_currency') or '' }}</strong>
+{% if snapshot.get('processing_cost_quote') is not none and (snapshot.get('processing_currency') or snapshot.get('basis_currency')) != snapshot.get('quote_currency') %}<small class="field-help">{{ snapshot.get('processing_cost_quote') }} {{ snapshot.get('quote_currency') }} after FX</small>{% endif %}
+</div>
+<div class="single-metric">
+<span>Applicable freight</span>
+<strong>{{ snapshot.get('freight_cost') if snapshot.get('freight_cost') is not none else 'Unresolved' }} {{ snapshot.get('freight_currency') or snapshot.get('basis_currency') or '' }}</strong>
+{% if snapshot.get('freight_cost_quote') is not none and (snapshot.get('freight_currency') or snapshot.get('basis_currency')) != snapshot.get('quote_currency') %}<small class="field-help">{{ snapshot.get('freight_cost_quote') }} {{ snapshot.get('quote_currency') }} after FX</small>{% endif %}
+</div>
+<div class="single-metric">
+<span>Cost basis</span>
+<strong>{{ snapshot.get('cost_basis') or snapshot.get('pricing_basis','Unresolved') }}</strong>
+</div>
+</div>
+{% elif quote.kind != 'chemical' %}
+<p class="muted-note">Treatment plant pricing is entered manually. No recipe or purchase cost is implied.</p>
+{% else %}
+<p class="muted-note">Internal cost, margin and recipe details are restricted for this account.</p>
+{% endif %}
+{% if snapshot.get('unresolved') %}<div class="notice amber section-card">
+<div>
+<strong>Resolve before marking ready</strong>
+<ul>{% for issue in snapshot.unresolved %}<li>{{ issue.get('item','') }} {{ issue.reason|replace('_',' ') }}</li>{% endfor %}</ul>
+</div>
+</div>{% endif %}</div>
+</section>
+  <section class="card">
+<div class="card-head">
+<h2>Revision history</h2>
+</div>
+<div class="card-body">
+<ol class="timeline">{% for item in versions %}<li>
+<small>{{ item.created_at }} · revision {{ item.revision }}</small>{{ item.status }}{% if item.id == version.id %} · current{% endif %}</li>{% endfor %}{% for item in events %}<li>
+<small>{{ item.at }}</small>{{ item.action|title }}</li>{% endfor %}</ol>
+</div>
+</section>
+</div>
+<div class="stack">
+<section class="card quote-summary">
+<div class="card-head">
+<div>
+<h2>Quotation summary</h2>
+<p class="card-sub">Revision {{ version.revision }} · {{ version.status }}</p>
+</div>
+</div>
+<div class="card-body">
+<div class="quote-price">
+<div class="small">Selling price · {{ snapshot.get('quote_currency') or 'Unspecified' }}</div>
+<div class="amount code">{{ snapshot.get('selling_price') if snapshot.get('selling_price') is not none else 'Unresolved' }}</div>
+<div class="small">{{ snapshot.get('quantity') or '—' }} {{ snapshot.get('unit') or '' }}{% if quote.kind == 'chemical' and can('quotations.price_edit') %} · gross margin {{ (snapshot.get('gross_margin') or 0) * 100 }}%{% elif quote.kind != 'chemical' %} · manual price{% endif %}</div>
+</div>
+<div class="drawer-section">
+{% if show_costs %}<div class="single-metric">
+<span>Total cost</span>
+<strong>{% if quote.kind == 'chemical' %}{{ snapshot.get('total_cost') if snapshot.get('total_cost') is not none else 'Unresolved' }} {{ snapshot.get('total_cost_currency') or snapshot.get('basis_currency') or '' }}{% else %}Not used for manual pricing{% endif %}</strong>
+</div>
+<div class="single-metric">
+<span>FX</span>
+<strong>{{ snapshot.get('fx',{}).get('rate') or 'Not needed / unresolved' }} {{ snapshot.get('fx',{}).get('direction') or '' }}</strong>
+</div>{% endif %}
+<div class="single-metric">
+<span>Payment terms</span>
+<strong>{{ snapshot.get('payment_terms') or 'Not recorded' }}</strong>
+</div>
+<div class="single-metric">
+<span>Delivery terms</span>
+<strong>{{ snapshot.get('delivery_terms') or 'Not recorded' }}</strong>
+</div>
+<div class="single-metric">
+<span>Destination</span>
+<strong>{{ snapshot.get('destination') or 'Not recorded' }}</strong>
+</div>
+<div class="single-metric">
+<span>Valid through</span>
+<strong>{{ snapshot.get('validity_date') or 'Not recorded' }}</strong>
+</div>
+</div>
+</div>
+</section>
+<section class="card">
+<div class="card-head">
+<h2>Actions</h2>
+</div>
+<div class="card-body">
+{% if (can('financial.export') or can('quotations.price_edit')) and can('clients.identity_view') and snapshot.get('selling_price') is not none and not snapshot.get('unresolved') %}<a class="btn primary" href="{{ url_for('quote_workbook', quote_id=quote.id) }}">Download Excel quotation + PI</a>
+<p class="muted-note section-card">The workbook contains a client-facing quotation and an editable PI sheet. Internal costs and margin are excluded.</p>{% else %}<p class="muted-note">Resolve and save the quotation to enable the Excel quotation and PI workbook.</p>{% endif %}
+{% if can('quotations.edit') %}<div class="status-actions">{% if version.status == 'Draft' %}<form method="post" action="{{ url_for('quote_action', quote_id=quote.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button class="btn lime" name="action" value="ready" type="submit">Mark ready to send</button>
+</form>{% elif version.status == 'Ready' %}<form method="post" action="{{ url_for('quote_action', quote_id=quote.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button class="btn primary" name="action" value="sent" type="submit">Record as sent</button>
+</form>{% elif version.status == 'Sent' %}{% for action in ['accepted','rejected','expired'] %}<form method="post" action="{{ url_for('quote_action', quote_id=quote.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button class="btn" name="action" value="{{ action }}" type="submit">{{ action|title }}</button>
+</form>{% endfor %}{% endif %}{% if version.status != 'Draft' %}<form method="post" action="{{ url_for('quote_action', quote_id=quote.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button class="btn" name="action" value="revise" type="submit">Create new revision</button>
+</form>{% endif %}</div>{% endif %}
+<p class="muted-note section-card">Changing status records an internal event. Sending occurs outside this app.</p>
+</div>
+</section>
+</div>
+</div>
+{% endblock %}

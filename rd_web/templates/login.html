@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#162c2d">
+  <title>Sign in &middot; RDIC</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='demo.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="login-intro" aria-labelledby="workspace-title">
+      <a class="login-brand" href="{{ url_for('login') }}" aria-label="RDIC sign in">
+        <span class="login-brand-mark">RD</span>
+        <span><strong>RDIC</strong><small>Operations workspace</small></span>
+      </a>
+      <div class="login-intro-copy">
+        <p class="login-eyebrow">Internal company system</p>
+        <h1 id="workspace-title">One workspace for your commercial operations.</h1>
+        <p>Review clients, suppliers, follow-ups and quotations from a single secure dashboard.</p>
+      </div>
+      <ul class="login-benefits" aria-label="Workspace features">
+        <li><span aria-hidden="true">✓</span> Role-based access for every team member</li>
+        <li><span aria-hidden="true">✓</span> Source data and manual decisions kept auditable</li>
+        <li><span aria-hidden="true">✓</span> Follow-ups stay visible across assigned profiles</li>
+      </ul>
+      <p class="login-intro-foot">R D Industrial Corporation</p>
+    </section>
+
+    <section class="login-card-wrap" aria-labelledby="signin-title">
+      <div class="login-card">
+        <div class="login-card-head">
+          <span class="login-lock" aria-hidden="true">◆</span>
+          <div>
+            <p class="login-eyebrow">Secure access</p>
+            <h2 id="signin-title">Welcome back</h2>
+            <p>Sign in with your individual RDIC account.</p>
+          </div>
+        </div>
+        {% for category, message in get_flashed_messages(with_categories=true) %}<div class="notice amber login-notice" role="alert">{{ message }}</div>{% endfor %}
+        {% if configured %}
+        <form method="post" class="login-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <input type="hidden" name="next" value="{{ next }}">
+          <input type="hidden" name="captcha_token" value="{{ captcha.token }}">
+          <div class="login-field">
+            <label for="username">Username</label>
+            <input id="username" name="username" value="{{ username }}" autocomplete="username" maxlength="100" required {% if not username %}autofocus{% endif %}>
+          </div>
+          <div class="login-field">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" maxlength="512" required {% if username %}autofocus{% endif %}>
+          </div>
+          <fieldset class="captcha-box">
+            <legend>Security check</legend>
+            <div class="captcha-row">
+              <div>
+                <span class="captcha-label">Solve to continue</span>
+                <strong class="captcha-question">{{ captcha.prompt }} = ?</strong>
+              </div>
+              <label class="captcha-answer" for="captcha-answer">
+                <span>Answer</span>
+                <input id="captcha-answer" name="captcha_answer" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" required aria-describedby="captcha-help">
+              </label>
+            </div>
+            <div class="captcha-help" id="captcha-help">Challenge expires in five minutes. <a href="{{ url_for('login', next=next) }}">Get a new question</a></div>
+          </fieldset>
+          <button class="button primary login-submit" type="submit"><span>Sign in securely</span><span aria-hidden="true">→</span></button>
+        </form>
+        {% else %}
+        <div class="notice amber login-notice">No administrator exists. Run the documented <code>bootstrap-admin</code> command on the server; there is no default password or public registration.</div>
+        {% endif %}
+        <p class="login-security-note"><span aria-hidden="true">●</span> Protected by CAPTCHA, rate limiting and secure session cookies.</p>
+      </div>
+      <p class="login-authorized">Authorized team members only</p>
+    </section>
+  </main>
+</body>
+</html>

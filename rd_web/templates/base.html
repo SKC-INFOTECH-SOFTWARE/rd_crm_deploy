@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#162c2d">
+  <title>{{ page }} · RDIC</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='demo.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to workspace</a>
+  <div class="shell">
+    <div class="sidebar-shade" id="sidebar-shade" hidden></div>
+    <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+      <a class="brand" href="{{ url_for('overview') }}">
+        <span class="brand-mark">RD</span><span><span class="brand-name">RDIC</span><span class="brand-caption">Operations workspace</span></span>
+      </a>
+      <div class="nav-label">Workspace</div>
+      <nav>
+        {% for label, endpoint, symbol, permission in [('Overview','overview','O','dashboard.view'),('Clients','client_list','C','clients.view'),('Suppliers','supplier_list','S','clients.view'),('Follow-ups','followup_list','F','followups.manage'),('Quotations','quote_list','Q','quotations.view'),('Products & Costing','products','P','costs.view'),('Stock balances','stock_balances','St','stock.view')] %}
+          {% if can(permission) and not (endpoint == 'supplier_list' and ('Sales' in current_user.roles or 'External Sales' in current_user.roles)) %}<a class="nav-btn {{ 'active' if page == label else '' }}" href="{{ client_directory_url if endpoint == 'client_list' else url_for(endpoint) }}" {% if page == label %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">{{ symbol }}</span><span>{{ label }}</span></a>{% endif %}
+        {% endfor %}
+        {% if can('data_review.manage') %}<a class="nav-btn {{ 'active' if page == 'Data review' else '' }}" href="{{ url_for('data_review') }}" {% if page == 'Data review' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">!</span><span>Data review</span></a>{% endif %}
+      </nav>
+      {% if can('sync.run') or can('users.manage') %}
+      <div class="nav-label">Administration</div>
+      <nav>
+        {% if can('sync.run') %}<a class="nav-btn {{ 'active' if page == 'Sync status' else '' }}" href="{{ url_for('sync_status') }}"><span class="nav-icon" aria-hidden="true">Sy</span><span>Sync status</span></a>{% endif %}
+        {% if can('users.manage') %}<a class="nav-btn {{ 'active' if page == 'Users' else '' }}" href="{{ url_for('user_admin') }}"><span class="nav-icon" aria-hidden="true">U</span><span>Users</span></a>{% endif %}
+      </nav>
+      {% endif %}
+      <div class="sidebar-bottom">
+        <div class="workspace-note">Woodworth · R D Industrial Corporation<br>Persistent CRM workspace</div>
+        <div class="user"><span class="avatar self">RD</span><span><span>{{ current_user.display_name if current_user else 'Signed out' }}</span><span class="user-role">{{ current_user.roles|join(', ') if current_user else '' }}</span></span></div>
+        {% if auth_enabled %}<form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="button" type="submit">Sign out</button></form>{% endif %}
+      </div>
+    </aside>
+    <div class="main-shell">
+      <header class="topbar">
+        <div class="breadcrumbs"><button class="mobile-menu" id="mobile-menu" type="button" aria-label="Toggle navigation" aria-expanded="false">Menu</button><span class="org-crumb">R D Industrial Corporation</span><span class="org-crumb">/</span><strong>{{ page }}</strong></div>
+        <div class="topbar-right"><span class="topbar-date muted">{{ today.strftime('%A, %d %B %Y') }}</span><span class="demo-badge">{{ 'Server data' if auth_enabled else 'Local data' }}</span></div>
+      </header>
+      <main id="main" class="page" tabindex="-1">
+        {% for category, message in get_flashed_messages(with_categories=true) %}<div class="notice {{ 'amber' if category == 'error' else '' }} flash" role="status">{{ message }}</div>{% endfor %}
+        {% block content %}{% endblock %}
+        <footer class="bottom-note"><span>Last successful source commit (UTC): {{ checkpoint or 'None recorded' }}</span><span>CRM {{ release.release }} · {{ release.revision }} · Messages are never sent automatically.</span></footer>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Administration</p><h1>User access</h1><p>Individual accounts, roles and immediate session revocation.</p></div></div>
+<div class="detail-grid">
+  <section class="panel">
+    <h2>Create user</h2>
+    <form method="post" class="form-stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label>Username <input name="username" required></label>
+      <label>Display name <input name="display_name" required></label>
+      <label>Temporary password <input name="password" type="password" minlength="8" required></label>
+      <label>Role <select name="role">{% for role in roles %}<option>{{ role.name }}</option>{% endfor %}</select></label>
+      <button class="button primary" type="submit">Create user</button>
+    </form>
+  </section>
+  <section class="panel">
+    <h2>Configured roles</h2>
+    {% for role in roles %}<p><strong>{{ role.name }}</strong><br><span class="muted">{{ role.description }}</span></p>{% endfor %}
+  </section>
+</div>
+<section class="panel">
+  <h2>Users</h2>
+  <div class="table-wrap"><table><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Access actions</th></tr></thead><tbody>
+  {% for user in users %}<tr>
+    <td><strong>{{ user.display_name }}</strong><br><span class="muted">{{ user.username }}</span></td>
+    <td>{{ user.role_names or 'None' }}</td><td>{{ 'Active' if user.active else 'Deactivated' }}</td>
+    <td>
+      <form method="post" action="{{ url_for('change_user', user_id=user.id) }}" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <select name="role">{% for role in roles %}<option {% if role.name in (user.role_names or '') %}selected{% endif %}>{{ role.name }}</option>{% endfor %}</select>
+        <button name="action" value="role">Set role</button>
+      </form>
+      <form method="post" action="{{ url_for('change_user', user_id=user.id) }}" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <input name="password" type="password" minlength="8" placeholder="New password">
+        <button name="action" value="reset">Reset</button>
+        <button name="action" value="{{ 'deactivate' if user.active else 'activate' }}">{{ 'Deactivate' if user.active else 'Activate' }}</button>
+      </form>
+    </td>
+  </tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

@@ -1,0 +1,131 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-head">
+<div>
+<div class="eyebrow">Client actions</div>
+<h1>Follow-ups</h1>
+<p class="subhead">Today, overdue and upcoming work in {{ zone }}. Date-only tasks turn overdue the next day.</p>
+</div>
+<div class="head-actions">
+<a class="btn primary" href="#schedule">Schedule follow-up</a>
+</div>
+</div>
+<div class="metrics">
+<a class="metric metric-link highlight" href="#today">
+<div class="metric-top">Today <span>◷</span>
+</div>
+<div class="metric-value">{{ groups.Today|length }}</div>
+<div class="metric-foot">Open tasks due today</div>
+</a>
+<a class="metric metric-link" href="#overdue">
+<div class="metric-top">Overdue <span>!</span>
+</div>
+<div class="metric-value">{{ groups.Overdue|length }}</div>
+<div class="metric-foot">Earlier due dates</div>
+</a>
+<a class="metric metric-link" href="#upcoming">
+<div class="metric-top">Upcoming <span>→</span>
+</div>
+<div class="metric-value">{{ groups.Upcoming|length }}</div>
+<div class="metric-foot">Scheduled ahead</div>
+</a>
+</div>
+{% set suggestion_origin = 'followups' %}{% include 'followup_suggestions.html' %}
+{% for title, rows in [('Today',groups.Today),('Overdue',groups.Overdue),('Upcoming',groups.Upcoming)] %}<section class="card section-card" id="{{ title|lower }}">
+<div class="card-head">
+<div>
+<h2>{{ title }}</h2>
+<p class="card-sub">{{ rows|length }} open follow-up{{ '' if rows|length == 1 else 's' }}</p>
+</div>
+<span class="pill {{ 'amber' if title == 'Overdue' else 'green' if title == 'Today' else 'blue' }}">{{ title }}</span>
+</div>{% if rows %}<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Next action</th>
+<th>Client</th>
+<th>Owner</th>
+<th>Due</th>
+<th>Update</th>
+</tr>
+</thead>
+<tbody>{% for row in rows %}<tr id="task-{{ row.id }}">
+<td>
+<div class="task-title">{{ row.purpose }}</div>
+<div class="cell-sub">{{ row.channel }}{% if row.opportunity_id %} · opportunity {{ row.opportunity_id }}{% endif %}{% if row.quotation_id %} · quote {{ row.quotation_id }}{% endif %}</div>
+</td>
+<td>
+<a href="{{ url_for('client_detail', client_id=row.client_id) }}">{{ row.client_name }}</a>
+</td>
+<td>{{ row.owner }}</td>
+<td class="nowrap">{{ row.due_date }}<div class="cell-sub">{{ row.due_time or 'Any time' }}</div>
+</td>
+<td>
+<form class="task-actions" method="post" action="{{ url_for('change_followup', followup_id=row.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button class="btn small" name="action" value="complete" type="submit">Complete</button>
+<button class="btn small" name="action" value="cancel" type="submit">Cancel</button>
+</form>
+<details>
+<summary class="small">Reschedule</summary>
+<form class="task-actions" method="post" action="{{ url_for('change_followup', followup_id=row.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<input type="date" name="due_date" value="{{ row.due_date }}" required aria-label="New due date">
+<input type="time" name="due_time" value="{{ row.due_time or '' }}" aria-label="New due time">
+<button class="btn small" name="action" value="reschedule" type="submit">Save</button>
+</form>
+</details>
+</td>
+</tr>{% endfor %}</tbody>
+</table>
+</div>{% else %}<div class="empty-card">No open follow-ups in this view.</div>{% endif %}</section>{% endfor %}
+<section class="card section-card" id="schedule">
+<div class="card-head">
+<div>
+<h2>Schedule a follow-up</h2>
+<p class="card-sub">An internal task. No message is sent and completing it does not log contact.</p>
+</div>
+</div>
+<form class="card-body" method="post" action="{{ url_for('create_followup') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<div class="form-grid">
+<div class="field">
+<label for="task-client">Client *</label>
+<select id="task-client" name="client_id" required>
+<option value="">Choose client</option>{% for client in clients %}<option value="{{ client.id }}">{{ client.alias or client.name }}</option>{% endfor %}</select>
+</div>
+<div class="field">
+<label for="task-owner">Assigned owner *</label>
+<input id="task-owner" name="owner" required>
+</div>
+<div class="field">
+<label for="task-date">Due date *</label>
+<input id="task-date" type="date" name="due_date" value="{{ today }}" required>
+</div>
+<div class="field">
+<label for="task-time">Due time (optional)</label>
+<input id="task-time" type="time" name="due_time">
+</div>
+<div class="field">
+<label for="task-channel">Channel</label>
+<select id="task-channel" name="channel">{% for channel in channels %}<option>{{ channel }}</option>{% endfor %}</select>
+</div>
+<div class="field">
+<label for="task-purpose">Purpose *</label>
+<input id="task-purpose" name="purpose" required>
+</div>
+<div class="field">
+<label for="task-opportunity">Opportunity ID (optional)</label>
+<input id="task-opportunity" name="opportunity_id" type="number" min="1">
+</div>
+<div class="field">
+<label for="task-quote">Quotation ID (optional)</label>
+<input id="task-quote" name="quotation_id" type="number" min="1">
+</div>
+</div>
+<div class="form-actions">
+<button class="btn primary" type="submit">Schedule</button>
+</div>
+</form>
+</section>
+<p class="muted-note section-card" id="log-interaction">To log an actual interaction and schedule the next step together, open the client profile and use “Log interaction and schedule next follow-up.”</p>
+{% endblock %}

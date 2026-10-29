@@ -1,0 +1,87 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-head">
+<div>
+<div class="eyebrow">Commercial workspace</div>
+<h1>Quotations</h1>
+<p class="subhead">Versioned offers built from latest eligible purchase costs or explicit manual plant pricing.</p>
+</div>
+{% if can('quotations.edit') %}<a class="btn primary" href="#new-quote">New quotation</a>{% endif %}
+</div>
+<div class="notice small">Drafts are internal. “Sent” records a manual status change after you send through your approved channel; this app sends no external messages.</div>
+<details class="card section-card">
+<summary class="card-head"><strong>How to create and send a quotation</strong></summary>
+<div class="card-body">
+<ol class="timeline">
+<li><strong>Create draft</strong><br><span class="muted-note">Choose the client and whether this is a chemical or treatment-plant quotation.</span></li>
+<li><strong>Enter pricing and terms</strong><br><span class="muted-note">For chemicals, select the recipe, quantity, currencies, conversion and margin. For treatment plants, enter the total selling price.</span></li>
+<li><strong>Finish</strong><br><span class="muted-note">Save, mark ready, download the Excel quotation + PI, then record it as sent.</span></li>
+</ol>
+</div>
+</details>
+<section class="card section-card">
+<div class="card-head">
+<div>
+<h2>Quotation history</h2>
+<p class="card-sub">Latest revision of each quotation</p>
+</div>
+</div>{% if quotes %}<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Quotation</th>
+<th>Client</th>
+<th>Type</th>
+<th>Status</th>
+<th>Revision</th>
+<th>
+</th>
+</tr>
+</thead>
+<tbody>{% for row in quotes %}<tr>
+<td class="cell-title">#{{ row.id }}</td>
+<td>{{ row.client_name }}</td>
+<td>{{ row.kind|replace('_',' ') }}</td>
+<td>
+<span class="pill {{ 'amber' if row.status == 'Sent' else 'green' if row.status == 'Accepted' else 'blue' }}">{{ row.status }}</span>
+</td>
+<td>{{ row.revision }}</td>
+<td>
+<a class="btn small" href="{{ url_for('quote_detail', quote_id=row.id) }}">Open</a>
+</td>
+</tr>{% endfor %}</tbody>
+</table>
+</div>{% else %}<div class="empty-card">No quotations saved yet. Create a draft below.</div>{% endif %}</section>
+{% if can('quotations.edit') %}<section class="card section-card" id="new-quote">
+<div class="card-head">
+<div>
+<h2>New quotation</h2>
+<p class="card-sub">Start with a client and enquiry type; pricing and terms are entered on the next screen.</p>
+</div>
+</div>
+<form class="card-body" method="post" action="{{ url_for('create_quote') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<div class="form-grid">
+<div class="field">
+<label for="quote-client">Client *</label>
+<select id="quote-client" name="client_id" required>
+<option value="">Choose client</option>{% for client in clients %}<option value="{{ client.id }}" {{ 'selected' if request.args.get('client_id') == client.id|string else '' }}>{{ client.alias or client.name }}</option>{% endfor %}</select>
+</div>
+<div class="field">
+<label for="quote-kind">Quotation type</label>
+<select id="quote-kind" name="kind">
+<option value="chemical">Chemical</option>
+<option value="treatment_plant">Treatment plant</option>
+</select>
+</div>
+<div class="field">
+<label for="quote-opp">Opportunity ID (optional)</label>
+<input id="quote-opp" type="number" name="opportunity_id" min="1">
+<small class="field-help">Must belong to this client and match the quotation type.</small>
+</div>
+</div>
+<div class="form-actions">
+<button class="btn primary" type="submit">Create draft</button>
+</div>
+</form>
+</section>{% endif %}
+{% endblock %}

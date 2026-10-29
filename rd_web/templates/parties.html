@@ -1,0 +1,51 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-head">
+<div>
+<div class="eyebrow">Imported parties</div>
+<h1>Create linked {{ 'supplier' if kind == 'supplier' else 'client' }}</h1>
+<p class="subhead">Choose the exact source company and PartyId. Results are restricted to {{ kind }} masters.</p>
+</div>
+<a class="btn" href="{{ back_url }}">Back to {{ 'suppliers' if kind == 'supplier' else 'clients' }}</a>
+</div>
+<form class="toolbar" method="get">
+<input type="hidden" name="kind" value="{{ kind }}">
+<div class="filters">
+<label class="field" for="party-search">
+<span class="field-help">Name or PartyId</span>
+<input id="party-search" name="q" value="{{ search }}" placeholder="Search imported parties">
+</label>
+<button class="btn" type="submit">Search</button>
+<label class="inline-check"><input type="checkbox" name="include_non_party_ledgers" value="1" {{ 'checked' if include_ledgers }}> Include accounting ledgers</label>
+</div>
+</form>
+<section class="card">
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Party</th>
+<th>Company</th>
+<th>PartyId</th>
+<th>Create profile</th>
+</tr>
+</thead>
+<tbody>{% for row in rows %}<tr>
+<td class="cell-title">{{ row.name }}</td>
+<td>{{ row.source_companies|replace(',', ' + ') if row.source_count > 1 else row.source_company }}</td>
+<td class="code">{{ row.party_id }}</td>
+<td>
+<form method="post" action="{{ url_for('party_profile') }}" class="inline-form">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<input type="hidden" name="company" value="{{ row.source_company }}">
+<input type="hidden" name="party_id" value="{{ row.party_id }}">
+<input aria-label="Profile owner for {{ row.name }}" name="owner" placeholder="Owner">
+<button class="btn small" type="submit">{{ 'Use grouped source masters' if row.source_count > 1 else 'Use exact party' }}</button>
+</form>
+</td>
+</tr>{% else %}<tr>
+<td colspan="4">{{ 'No matching parties.' if search else 'Search for a party by name or PartyId.' }}</td>
+</tr>{% endfor %}</tbody>
+</table>
+</div>
+</section>
+{% endblock %}

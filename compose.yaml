@@ -1,0 +1,117 @@
+x-app-environment: &app_environment
+  RD_ENV: production
+  RD_COOKIE_SECURE: ${RD_COOKIE_SECURE:-true}
+  RD_DATABASE_URL: ${RD_DATABASE_URL:?Set RD_DATABASE_URL with a URL-encoded password}
+  RD_BACKUP_DIR: /backups
+  RD_RELEASE: ${RD_RELEASE:?Set RD_RELEASE to the VERSION value}
+  RD_REVISION: ${RD_REVISION:?Set RD_REVISION to the deployed Git commit}
+  RD_IMAGE: ${RD_IMAGE:?Set RD_IMAGE to an immutable release tag}
+  RD_IMPORT_CONFIG_PATH: /runtime-config/import_config.json
+  RD_CLIENT_DATA_OVERRIDES_PATH: /runtime-config/client_data_overrides.json
+  RD_CLIENT_IDENTITY_GROUPS_PATH: /runtime-config/client_identity_groups.json
+  RD_IGNORED_CLIENTS_PATH: /runtime-config/ignored_clients.json
+  RD_CLIENT_PROFILE_ENRICHMENT_PATH: /runtime-config/client_profile_enrichment.json
+  RD_SUPPLIER_DIRECTORY_PATH: /runtime-config/supplier_directory.json
+
+x-app-image: &app_image
+  image: ${RD_IMAGE:?Set RD_IMAGE to an immutable release tag}
+  build:
+    context: .
+    args:
+      RD_RELEASE: ${RD_RELEASE}
+      RD_REVISION: ${RD_REVISION}
+
+services:
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rdic
+      POSTGRES_USER: rdic
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rdic -d rdic"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    <<: *app_image
+    environment:
+      <<: *app_environment
+      RD_SECRET_KEY: ${RD_SECRET_KEY:?Set RD_SECRET_KEY}
+      RD_ADMIN_USERNAME: ${RD_ADMIN_USERNAME:-}
+      RD_ADMIN_DISPLAY_NAME: ${RD_ADMIN_DISPLAY_NAME:-}
+      RD_ADMIN_PASSWORD: ${RD_ADMIN_PASSWORD:-}
+    command: ["python", "-m", "rd_ops", "migrate"]
+    depends_on:
+      database:
+        condition: service_healthy
+    volumes:
+      - ./runtime-config:/runtime-config:ro
+
+  web:
+    <<: *app_image
+    restart: unless-stopped
+    environment:
+      <<: *app_environment
+      RD_SECRET_KEY: ${RD_SECRET_KEY:?Set RD_SECRET_KEY}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./runtime-config:/runtime-config:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  scheduler:
+    <<: *app_image
+    restart: unless-stopped
+    environment:
+      <<: *app_environment
+      RD_SUBSCRIPTION_KEY: ${RD_SUBSCRIPTION_KEY:-}
+      RD_PRIVATE_KEY_PATH: ${RD_PRIVATE_KEY_PATH:-/app/secrets/private_key.pem}
+      RD_PRIVATE_KEY_PASSWORD: ${RD_PRIVATE_KEY_PASSWORD:-}
+    command: ["python", "-m", "rd_import.scheduler"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./runtime-config:/runtime-config:ro
+      - ./secrets:/app/secrets:ro
+
+  backup:
+    <<: *app_image
+    restart: unless-stopped
+    environment: *app_environment
+    command: ["python", "-m", "rd_ops", "backup-loop", "--interval", "86400", "--retention-days", "30"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - backups:/backups
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # Only this port is published on the host; 80/443 stay free for other sites.
+    ports:
+      - "${RD_PORT:-7060}:7060"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  backups:
+  caddy_data:
+  caddy_config:

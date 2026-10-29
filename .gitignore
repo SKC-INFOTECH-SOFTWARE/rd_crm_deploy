@@ -1,0 +1,23 @@
+output/
+secrets/
+.env
+.venv/
+__pycache__/
+*.pem
+config.json
+runtime-config/*.json
+!runtime-config/README.md
+.env.*
+!.env.example
+data/
+*.key
+*.pfx
+*.p12
+*.db
+*.db-*
+*.sqlite*
+*.lock
+*.log
+.ipynb_checkpoints/
+# Personal notebook copies can contain saved business data.
+*.local.ipynb

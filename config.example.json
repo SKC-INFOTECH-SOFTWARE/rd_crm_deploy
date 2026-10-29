@@ -1,0 +1,13 @@
+{
+  "base_url": "https://balance-vendor.example/api",
+  "master_company": "RDIC",
+  "transaction_company": "RD",
+  "endpoint_companies": {},
+  "decryption_mode": "helper",
+  "private_key_path": "secrets/private_key.pem",
+  "subscription_key_header": "",
+  "timeout_seconds": 120,
+  "endpoint_company_scopes": {
+    "party-master": ["RDIC", "RD"]
+  }
+}

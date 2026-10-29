@@ -1,0 +1,30 @@
+<section class="card section-card" id="suggested-followups">
+  <details class="suggestion-disclosure">
+  <summary class="card-head"><div>
+    <h2>Suggested follow-ups</h2>
+    <p class="card-sub">Hidden until you choose to review purchase and payment recommendations.</p>
+  </div><span class="suggestion-toggle">{% if suggestions %}<span class="pill blue">{{ suggestions|length }} suggestion{{ '' if suggestions|length == 1 else 's' }}</span>{% endif %}<span>Show</span><span class="suggestion-chevron" aria-hidden="true">⌄</span></span></summary>
+  <div class="suggestion-content">
+  {% if suggestions %}<div class="table-wrap"><table class="detail-table"><thead><tr>
+    <th>Suggestion</th><th>Why it is suggested</th><th>Schedule</th>
+  </tr></thead><tbody>{% for suggestion in suggestions %}<tr>
+    <td><div class="task-title">{{ suggestion.title }}</div>
+      <a href="{{ url_for('client_detail', client_id=suggestion.client_id) }}">{{ suggestion.client_name }}</a>
+      <div class="cell-sub"><span class="pill {{ 'green' if suggestion.confidence == 'High' else 'blue' if suggestion.confidence == 'Medium' else 'amber' }}">{{ suggestion.confidence }} confidence</span></div>
+    </td>
+    <td><div>{{ suggestion.reason }}</div><div class="cell-sub">Recommended date: {{ suggestion.due_date }}{% if suggestion.predicted_date != suggestion.due_date %} · trend date {{ suggestion.predicted_date }} has already passed{% endif %}</div></td>
+    <td><form class="suggestion-form" method="post" action="{{ url_for('approve_followup_suggestion', client_id=suggestion.client_id, kind=suggestion.kind) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="origin" value="{{ suggestion_origin|default('client') }}">
+      {% if suggestion_origin|default('client') == 'client' %}<input type="hidden" name="return_to" value="{{ back_url }}">{% endif %}
+      <label>Owner <input name="owner" value="{{ suggestion.owner }}" required aria-label="Owner for {{ suggestion.title }}"></label>
+      <label>Due <input type="date" name="due_date" value="{{ suggestion.due_date }}" required aria-label="Due date for {{ suggestion.title }}"></label>
+      <label>Channel <select name="channel" aria-label="Channel for {{ suggestion.title }}">{% for channel in channels %}<option {{ 'selected' if channel == suggestion.channel else '' }}>{{ channel }}</option>{% endfor %}</select></label>
+      <button class="btn primary small" type="submit">Approve &amp; schedule</button>
+    </form></td>
+  </tr>{% endfor %}</tbody></table></div>
+  {% else %}<div class="empty-card">No new suggestions. Reorder suggestions need at least two confirmed purchase dates; payment suggestions need a calculated pending balance. Existing approved or open tasks are not duplicated.</div>{% endif %}
+  <div class="card-body"><p class="muted-note">These are operational reminders, not accounting due dates. Opening balances may be unavailable and actual invoice terms remain authoritative. Approval creates a CRM task only; it does not contact the client.</p></div>
+  </div>
+  </details>
+</section>

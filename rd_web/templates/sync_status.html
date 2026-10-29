@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Import operations</p><h1>Sync status</h1><p>The separate scheduler runs incremental imports hourly. User-facing times below are Asia/Kolkata.</p></div>
+<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="button primary" type="submit">Sync now</button></form></div>
+<div class="metric-grid">
+  <article class="metric"><span>Last attempt</span><strong>{{ sync.last_attempt_display or 'Never' }}</strong></article>
+  <article class="metric"><span>Last complete success</span><strong>{{ sync.last_success_display or 'Never' }}</strong></article>
+  <article class="metric"><span>Next scheduled run</span><strong>{{ sync.scheduler.next_run_at_display if sync.scheduler else 'Scheduler not started' }}</strong></article>
+  <article class="metric"><span>Worker state</span><strong>{{ sync.scheduler.last_status if sync.scheduler else 'Unavailable' }}</strong></article>
+</div>
+<section class="panel"><h2>Freshness by company and endpoint</h2>
+<div class="table-wrap"><table><thead><tr><th>Company</th><th>Endpoint</th><th>Latest status</th><th>Last success</th><th>Checkpoint date</th><th>Counts</th><th>Failure</th></tr></thead><tbody>
+{% for row in sync.scopes %}<tr><td>{{ row.company }}</td><td>{{ row.endpoint }}</td><td>{{ row.status }}</td><td>{{ row.last_success_display or 'Never' }}</td><td>{{ row.checkpoint_date or 'None' }}</td><td>{% for name in ['fetched','inserted','updated','unchanged','quarantined','failed'] %}{{ name }} {{ row.counts.get(name, 0) }}{% if not loop.last %} · {% endif %}{% endfor %}</td><td>{{ row.error_code or '—' }}</td></tr>{% else %}<tr><td colspan="7">No source attempts recorded.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="panel"><h2>Manual requests</h2><div class="table-wrap"><table><thead><tr><th>Requested</th><th>By</th><th>Status</th><th>Finished</th><th>Error category</th></tr></thead><tbody>
+{% for row in sync.requests %}<tr><td>{{ row.requested_at_display }}</td><td>{{ row.requested_by }}</td><td>{{ row.status }}</td><td>{{ row.finished_at_display or '—' }}</td><td>{{ row.error_code or '—' }}</td></tr>{% else %}<tr><td colspan="5">No manual requests.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

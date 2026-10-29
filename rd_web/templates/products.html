@@ -1,0 +1,78 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-head">
+  <div><div class="eyebrow">Products &amp; costing</div><h1>Products &amp; Costing</h1><p class="subhead">Imported products, configured recipes and latest eligible purchase rates for quotation estimates.</p></div>
+  {% if can('quotations.edit') %}<a class="btn primary" href="{{ url_for('quote_list') }}#new-quote">New quotation</a>{% endif %}
+</div>
+<div class="notice small">“Latest purchase cost” is an estimate basis, not stock valuation. Recipes do not post production or move stock.</div>
+
+<div class="two-col section-card">
+<section class="card">
+  <div class="card-head"><div><h2>Imported products</h2><p class="card-sub">{{ products.total }} current master records</p></div></div>
+  <form class="card-body toolbar" method="get"><div class="filters"><label class="field" for="product-q"><span class="field-help">Search name, code or ItemId</span><input id="product-q" name="q" value="{{ search }}"></label><button class="btn" type="submit">Search</button></div></form>
+  <div class="table-wrap"><table><thead><tr><th>Product</th><th>Company</th><th>ItemId</th><th>Unit</th></tr></thead><tbody>
+  {% for row in products.rows %}<tr><td class="cell-title">{{ row.name }}</td><td>{{ row.company }}</td><td class="code">{{ row.source_id }}</td><td>{{ row.Unit or 'Unspecified' }}</td></tr>{% else %}<tr><td colspan="4">No products match.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <div class="card-foot">First {{ products.rows|length }} matches shown. Use the detailed imported product browser for filters and source fields.</div>
+</section>
+
+<section class="card" id="recipes">
+  <div class="card-head"><div><h2>Recipe versions</h2><p class="card-sub">Approved local recipe records used for estimates</p></div>{% if can('recipes.manage') %}<a class="btn primary small" href="{{ url_for('products') }}#recipe-editor">Add recipe</a>{% endif %}</div>
+  <div class="card-body">{% for recipe in recipes %}<div class="mini-batch">
+    <div class="batch-meta"><div class="cell-title">{{ recipe.name }} · version {{ recipe.version }}</div><div class="cell-sub">{{ recipe.product_name }} · output {{ recipe.output }} {{ recipe.unit }}</div>
+    {% if can('recipes.manage') %}<div class="recipe-version-actions"><a class="btn small" href="{{ url_for('products', recipe_id=recipe.id) }}#recipe-editor">Create new version</a><form method="post" action="{{ url_for('set_recipe_active', recipe_id=recipe.id) }}" class="inline-form"><input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="active" value="{{ '0' if recipe.active else '1' }}"><button class="btn small" type="submit">{{ 'Deactivate' if recipe.active else 'Activate' }}</button></form></div>{% endif %}</div>
+    <span class="pill {{ 'green' if recipe.active else '' }}">{{ 'Active' if recipe.active else 'Inactive' }}</span>
+  </div>{% else %}<p class="muted-note">No recipe versions configured.{% if can('recipes.manage') %} Use Add recipe to create the first version.{% endif %}</p>{% endfor %}</div>
+</section>
+</div>
+
+{% if can('recipes.manage') %}<section class="card section-card" id="recipe-editor">
+  <div class="card-head"><div><h2>{{ 'Create new recipe version' if selected_recipe else 'Add recipe' }}</h2><p class="card-sub">{% if selected_recipe %}Copying {{ selected_recipe.name }} version {{ selected_recipe.version }}. Saving creates version {{ selected_recipe.version + 1 }}; the selected formulation remains unchanged.{% else %}Create an immutable first version for a configured finished product.{% endif %}</p></div></div>
+  {% if not stock_ready %}<div class="notice amber card-body">Stock setup is not initialized. Apply the additive stock migration before creating recipes.</div>
+  {% elif not finished_items %}<div class="notice amber card-body">No configured finished product is available. Configure the output product and its base unit in Stock setup first.</div>
+  {% else %}<form class="card-body" method="post" action="{{ url_for('save_recipe_version') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">{% if selected_recipe %}<input type="hidden" name="source_recipe_id" value="{{ selected_recipe.id }}">{% endif %}
+    <div class="form-grid">
+      <div class="field"><label for="recipe-product">Finished product *</label>{% if selected_recipe %}<input id="recipe-product" value="{{ selected_recipe.product_name }}" readonly>{% else %}<select id="recipe-product" name="product_id" required><option value="">Choose configured finished product</option>{% for item in finished_items %}<option value="{{ item.id }}">{{ item.display_name }} · {{ item.base_unit }}</option>{% endfor %}</select>{% endif %}</div>
+      <div class="field"><label for="recipe-name">Recipe name *</label><input id="recipe-name" name="name" value="{{ selected_recipe.name if selected_recipe else '' }}" {% if selected_recipe %}readonly{% endif %} required></div>
+      <div class="field"><label for="recipe-output">Standard expected output *</label><input id="recipe-output" name="output" value="{{ selected_recipe.output if selected_recipe else '' }}" inputmode="decimal" required></div>
+      <div class="field"><label for="recipe-unit">Output unit *</label><input id="recipe-unit" name="unit" value="{{ selected_recipe.unit if selected_recipe else '' }}" required><small class="field-help">Use the configured base unit or a confirmed product-specific conversion.</small></div>
+    </div>
+    <div class="section-card"><div class="card-head"><div><h3>Direct ingredients and packaging</h3><p class="card-sub">Each configured item may appear once. Quantities are for the standard output above.</p></div><button class="btn small" type="button" data-add-recipe-ingredient>Add ingredient</button></div>
+      <div class="card-body" data-recipe-rows>{% for row in recipe_rows %}<div class="recipe-ingredient-row">
+        <div class="field"><label>Configured item *</label><select class="recipe-ingredient-item" name="ingredient_item_id" required><option value="">Choose ingredient</option>{% for item in items %}<option value="{{ item.id }}" data-unit="{{ item.base_unit }}" {{ 'selected' if item.id|string == row.item_id|string else '' }}>{{ item.display_name }} · {{ item.base_unit }}</option>{% endfor %}</select></div>
+        <div class="field"><label>Quantity *</label><input name="ingredient_quantity" value="{{ row.quantity }}" inputmode="decimal" required></div>
+        <div class="field"><label>Unit *</label><input class="recipe-ingredient-unit" name="ingredient_unit" value="{{ row.unit }}" required></div>
+        <button class="btn small" type="button" data-remove-recipe-ingredient>Remove</button>
+      </div>{% endfor %}</div>
+    </div>
+    <div class="form-grid section-card"><div class="field full"><label for="recipe-notes">Recipe notes</label><textarea id="recipe-notes" name="notes">{{ selected_recipe.notes if selected_recipe else '' }}</textarea></div></div>
+    <label class="inline-check"><input type="checkbox" name="active" value="1" {{ 'checked' if not selected_recipe or selected_recipe.active }}> Make this version available for quotations</label>
+    <div class="form-actions"><button class="btn primary" type="submit">{{ 'Save as new version' if selected_recipe else 'Create recipe' }}</button>{% if selected_recipe %}<a class="btn" href="{{ url_for('products') }}#recipes">Cancel copy</a>{% endif %}</div>
+  </form>
+  <template id="recipe-ingredient-template"><div class="recipe-ingredient-row">
+    <div class="field"><label>Configured item *</label><select class="recipe-ingredient-item" name="ingredient_item_id" required><option value="">Choose ingredient</option>{% for item in items %}<option value="{{ item.id }}" data-unit="{{ item.base_unit }}">{{ item.display_name }} · {{ item.base_unit }}</option>{% endfor %}</select></div>
+    <div class="field"><label>Quantity *</label><input name="ingredient_quantity" inputmode="decimal" required></div>
+    <div class="field"><label>Unit *</label><input class="recipe-ingredient-unit" name="ingredient_unit" required></div>
+    <button class="btn small" type="button" data-remove-recipe-ingredient>Remove</button>
+  </div></template>{% endif %}
+</section>{% endif %}
+
+<section class="card section-card" id="latest-cost">
+  <div class="card-head"><div><h2>Latest purchase cost</h2><p class="card-sub">Confirmed item mapping, unit conversion, source status and resolved currency are required.</p></div></div>
+  <div class="card-body"><form class="form-grid" method="get">
+    <div class="field"><label for="cost-item">Configured item</label><select id="cost-item" name="item_id" required><option value="">Choose item</option>{% for item in items %}<option value="{{ item.id }}" {{ 'selected' if request.args.get('item_id') == item.id|string else '' }}>{{ item.display_name }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="cost-unit">Requested unit</label><input id="cost-unit" name="unit" value="{{ request.args.get('unit','') }}" placeholder="e.g. kg" required></div>
+    <div class="form-actions"><button class="btn primary" type="submit">Inspect cost</button></div>
+  </form>{% if cost %}<div class="notice {{ 'amber' if cost.status != 'ok' else '' }} section-card"><div><strong>{{ cost.status|replace('_',' ') }}</strong>{% if cost.status == 'ok' %}<div>Rate {{ cost.recipe_unit_rate }} {{ cost.currency }} / requested unit · {{ cost.date }} · {{ cost.get('invoice','Manual override') }} · {{ cost.get('supplier','') }} · {{ cost.get('currency_provenance','manual override')|replace('_',' ') }}</div>{% else %}<div>Review source mapping, cancellation policy, purchase unit, currency or a dated manual override.</div>{% endif %}</div></div>{% endif %}</div>
+  <details class="disclosure"><summary>Save a dated manual cost override</summary><form method="post" action="{{ url_for('cost_override') }}"><input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <div class="form-grid">
+      <div class="field"><label for="override-item">Item</label><select id="override-item" name="item_id" required><option value="">Choose item</option>{% for item in items %}<option value="{{ item.id }}">{{ item.display_name }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="override-amount">Unit cost *</label><input id="override-amount" name="amount" required></div>
+      <div class="field"><label for="override-unit">Unit *</label><input id="override-unit" name="unit" required></div>
+      <div class="field"><label for="override-currency">Currency</label><select id="override-currency" name="currency"><option>INR</option><option>USD</option></select></div>
+      <div class="field"><label for="override-date">Effective date</label><input id="override-date" name="effective_date" type="date" value="{{ today }}" required></div>
+      <div class="field full"><label for="override-reason">Reason *</label><textarea id="override-reason" name="reason" required></textarea></div>
+    </div><div class="form-actions"><button class="btn primary" type="submit">Save override</button></div>
+  </form></details>
+</section>
+{% endblock %}

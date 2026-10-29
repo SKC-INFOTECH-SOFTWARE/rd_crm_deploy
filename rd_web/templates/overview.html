@@ -1,0 +1,117 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-head">
+<div>
+<div class="eyebrow">Sales workspace</div>
+<h1>Business overview</h1>
+<p class="subhead">A clear view of client actions{% if show_quotations %} and quotations needing a response{% endif %}.</p>
+</div>
+<div class="head-actions">
+<a class="btn" href="{{ url_for('client_list') }}#add-client">Add client</a>
+<a class="btn" href="{{ url_for('followup_list') }}#log-interaction">Log interaction</a>
+{% if can('quotations.edit') %}<a class="btn primary" href="{{ url_for('quote_list') }}#new-quote">New quotation</a>{% endif %}
+</div>
+</div>
+<div class="metrics">
+<a class="metric metric-link highlight" href="{{ url_for('followup_list') }}#today">
+<div class="metric-top">Follow-ups today <span>◷</span>
+</div>
+<div class="metric-value">{{ groups.Today|length }}</div>
+<div class="metric-foot">Date-only tasks stay due all day</div>
+</a>
+<a class="metric metric-link" href="{{ url_for('followup_list') }}#overdue">
+<div class="metric-top">Overdue follow-ups <span>◷</span>
+</div>
+<div class="metric-value">{{ groups.Overdue|length }}</div>
+<div class="metric-foot">Needs a next action</div>
+</a>
+<a class="metric metric-link" href="{{ url_for('client_list') }}">
+<div class="metric-top">Open opportunities <span>♧</span>
+</div>
+<div class="metric-value">{{ open_opportunities }}</div>
+<div class="metric-foot">Chemical and treatment plant</div>
+</a>
+{% if show_quotations %}<a class="metric metric-link" href="{{ url_for('quote_list') }}">
+<div class="metric-top">Quotes awaiting response <span>▤</span>
+</div>
+<div class="metric-value">{{ waiting|length }}</div>
+<div class="metric-foot">Explicitly recorded as sent</div>
+</a>{% endif %}
+</div>
+<div class="grid-main">
+<section class="card">
+<div class="card-head">
+<div>
+<h2>Needs your attention</h2>
+<p class="card-sub">{{ groups.Today|length }} due today · {{ groups.Overdue|length }} overdue</p>
+</div>
+<span class="pill amber">Today</span>
+</div>{% set tasks = groups.Overdue + groups.Today %}{% if tasks %}<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Next action</th>
+<th>Client</th>
+<th>Owner</th>
+<th>Due</th>
+</tr>
+</thead>
+<tbody>{% for task in tasks[:12] %}<tr>
+<td>
+<a class="cell-title" href="{{ url_for('followup_list') }}#task-{{ task.id }}">{{ task.purpose }}</a>
+<div class="cell-sub">{{ task.channel }}</div>
+</td>
+<td>
+<a href="{{ url_for('client_detail', client_id=task.client_id) }}">{{ task.client_name }}</a>
+</td>
+<td>{{ task.owner }}</td>
+<td class="nowrap">{{ task.due_date }} {{ task.due_time or '' }}</td>
+</tr>{% endfor %}</tbody>
+</table>
+</div>{% else %}<div class="empty-card">No follow-ups due today or overdue. Schedule one from a client profile.</div>{% endif %}<div class="card-foot">
+<a href="{{ url_for('followup_list') }}">View all follow-ups →</a>
+</div>
+</section>
+<section class="card">
+<div class="card-head">
+<div>
+<h2>Open opportunities</h2>
+<p class="card-sub">Current CRM pipeline</p>
+</div>
+<span class="pill green">Open</span>
+</div>
+<div class="card-body">{% for item in opportunities %}<div class="mini-batch">
+<div class="batch-meta">
+<a class="cell-title" href="{{ url_for('client_detail', client_id=item.client_id) }}#opportunities">{{ item.title }}</a>
+<div class="cell-sub">{{ item.client_name }} · {{ item.kind|replace('_',' ') }}</div>
+</div>
+<span class="pill blue">{{ item.status }}</span>
+</div>{% else %}<p class="muted-note">No open opportunities yet.</p>{% endfor %}</div>
+</section>
+{% if show_quotations %}<section class="card">
+<div class="card-head">
+<div>
+<h2>Quotations awaiting a response</h2>
+<p class="card-sub">Sent status is recorded manually</p>
+</div>
+</div>
+<div class="card-body">{% for quote in waiting[:8] %}<div class="mini-batch">
+<div class="batch-meta">
+<a class="cell-title" href="{{ url_for('quote_detail', quote_id=quote.id) }}">Quotation {{ quote.id }} · revision {{ quote.revision }}</a>
+<div class="cell-sub">{{ quote.client_name }}</div>
+</div>
+<span class="pill amber">Sent</span>
+</div>{% else %}<p class="muted-note">No sent quotations awaiting a response.</p>{% endfor %}</div>
+</section>{% endif %}
+<section class="card">
+<div class="card-head">
+<h2>Upcoming follow-ups</h2>
+</div>
+<div class="card-body">{% for task in groups.Upcoming[:8] %}<div class="mini-batch">
+<div class="batch-meta">
+<div class="cell-title">{{ task.purpose }}</div>
+<div class="cell-sub">{{ task.client_name }} · {{ task.due_date }}</div>
+</div>
+</div>{% else %}<p class="muted-note">Nothing scheduled yet.</p>{% endfor %}</div>
+</section>
+</div>
+{% endblock %}

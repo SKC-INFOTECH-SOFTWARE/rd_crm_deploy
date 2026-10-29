@@ -1,0 +1,5 @@
+-r requirements-import.txt
+Flask>=3.1,<4
+XlsxWriter==3.2.5
+# Timezone data for Asia/Kolkata on Windows and minimal container images.
+tzdata>=2024.1

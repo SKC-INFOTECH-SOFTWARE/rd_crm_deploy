@@ -1,0 +1,2 @@
+# Optional: needed only for decryption_mode = local
+cryptography>=42

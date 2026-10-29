@@ -1,0 +1,35 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-head">
+<div>
+<div class="eyebrow">Imported-data controls</div>
+<h1>Quarantine review</h1>
+<p class="subhead">Review rows held back by the importer. Decisions affect this local database only and never write to Balance.</p>
+</div>
+</div>
+<div class="metrics">
+<div class="metric highlight"><div class="metric-top">Awaiting review <span>!</span></div><div class="metric-value">{{ review.total }}</div><div class="metric-foot">Unique source rows</div></div>
+<div class="metric"><div class="metric-top">Can be approved</div><div class="metric-value">{{ review.approvable }}</div><div class="metric-foot">Voucher-number conflicts</div></div>
+<div class="metric"><div class="metric-top">Structurally blocked</div><div class="metric-value">{{ review.blocked }}</div><div class="metric-foot">Missing or invalid identifiers</div></div>
+</div>
+<div class="notice amber section-card"><div><strong>Approval means “accept as a separate record.”</strong><br>The existing same-number voucher is retained. Approve only after confirming that both records are genuine. Rows missing a required identifier cannot be approved, but may be dismissed from this queue.</div></div>
+<section class="card section-card">
+<div class="card-head"><div><h2>Rows awaiting a decision</h2><p class="card-sub">Newest occurrence of each unique source payload</p></div></div>
+{% if review.rows %}<div class="table-wrap"><table>
+<thead><tr><th>Source row</th><th>Voucher</th><th>Party / amount</th><th>Why it was held</th><th>Decision</th></tr></thead>
+<tbody>{% for row in review.rows %}<tr>
+<td><div class="cell-title">{{ row.company }} · {{ row.endpoint }}</div><div class="cell-sub">Imported {{ row.started_at }} · row {{ row.row_index }}</div><details class="source-detail"><summary>Raw source data</summary><pre class="source-json">{{ row.payload_pretty }}</pre></details></td>
+<td><div class="cell-title">{{ row.number or 'Missing number' }}</div><div class="cell-sub">{{ row.date or 'No date' }}</div></td>
+<td><div>{{ row.party or 'Not supplied' }}</div><div class="cell-sub">{{ row.amount if row.amount is not none else 'Amount not supplied' }}</div></td>
+<td>{% for issue in row.issues %}<div class="review-issue"><span class="pill {{ 'amber' if 'possible_identity' in issue else 'red' if issue.startswith('missing_') or issue.startswith('invalid_') else '' }}">{{ issue|replace('_',' ') }}</span><div class="cell-sub">{{ explain_issue(issue) }}</div></div>{% endfor %}</td>
+<td><form class="review-actions" method="post" action="{{ url_for('decide_quarantine', source_id=row.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<label class="field"><span class="field-help">Optional review note</span><input name="note" maxlength="500" placeholder="What you checked"></label>
+<div class="task-actions">{% if row.approvable %}<button class="btn primary small" name="action" value="approve" type="submit" data-confirm="Accept this as a separate local voucher? The existing same-number voucher will remain.">Approve as new</button>{% else %}<span class="pill red">Approval blocked</span>{% endif %}<button class="btn small" name="action" value="dismiss" type="submit">Dismiss</button></div>
+</form></td>
+</tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-card">No unresolved quarantined rows.</div>{% endif %}
+</section>
+<section class="card section-card">
+<div class="card-head"><div><h2>Recent decisions</h2><p class="card-sub">Local audit trail; source payloads remain preserved</p></div></div>
+{% if decisions %}<div class="table-wrap"><table><thead><tr><th>When</th><th>Scope</th><th>Decision</th><th>Result</th><th>Note</th></tr></thead><tbody>{% for row in decisions %}<tr><td>{{ row.decided_at }}</td><td>{{ row.company }} · {{ row.endpoint }}</td><td><span class="pill {{ 'green' if row.decision == 'approved' else '' }}">{{ row.decision }}</span></td><td>{{ row.outcome }}</td><td>{{ row.note or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-card">No quarantine decisions have been recorded.</div>{% endif %}
+</section>
+{% endblock %}

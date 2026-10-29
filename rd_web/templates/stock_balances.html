@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Authoritative source only</p><h1>Stock balances</h1><p>This view never estimates stock from sales, purchases or recipes.</p></div></div>
+{% if not stock.available %}
+<section class="panel"><div class="notice amber"><strong>Authoritative stock is unavailable.</strong><br>The supplied Balance API collection has no verified stock-balance or stock-ledger feed, so no quantity is shown.</div>
+<h2>Required from the Balance vendor</h2>
+<p>Provide a read-only endpoint returning a complete snapshot with: company code; stable item ID and item name; stable warehouse/location ID and name; on-hand quantity; unit; and source as-of timestamp. If reserved or available quantities are supplied, their definitions must be documented. The vendor must also confirm whether the response is a complete snapshot or movements, pagination/completeness signals, incremental parameters, cancellation/deletion semantics, and authentication/throttling behaviour.</p></section>
+{% else %}
+<section class="panel"><h2>Latest successful stock snapshots</h2>{% for run in stock.runs %}<p><strong>{{ run.company }}</strong>: stock as of {{ run.source_as_of or run.finished_at }} · fetched {{ run.finished_at }} · {{ 'stale' if run.stale else 'fresh' }}</p>{% endfor %}
+<div class="table-wrap"><table><thead><tr><th>Company</th><th>Item</th><th>Location</th><th>Quantity</th><th>Unit</th><th>Reserved</th><th>Available</th><th>Status</th></tr></thead><tbody>
+{% for row in stock.balances %}<tr><td>{{ row.company }}</td><td>{{ row.item_name }}</td><td>{{ row.location_name }}</td><td>{{ row.quantity }}</td><td>{{ row.unit }}</td><td>{{ row.reserved_quantity if row.reserved_quantity is not none else '—' }}</td><td>{{ row.available_quantity if row.available_quantity is not none else '—' }}</td><td>{{ 'Stale' if row.stale else 'Fresh' }}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endif %}
+{% endblock %}

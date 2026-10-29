@@ -1,0 +1,30 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-head"><div>
+  <div class="eyebrow"><a href="{{ back_url }}">{{ 'Suppliers' if status == 'supplier' else 'Clients' }}</a> / {{ client.name }}</div>
+  <h1>{{ client.alias or client.name }}</h1>
+  <p class="subhead">{% if client.alias %}{{ client.name }} · {% endif %}{{ client.city or client.location or 'Location unspecified' }}{% if client.state %}, {{ client.state }}{% endif %}{% if client.country %}, {{ client.country }}{% endif %} · <span class="pill {{ 'green' if status == 'customer' else 'blue' }}">{{ status|capitalize }}</span></p>
+  <p class="subhead">Primary contact: {% if client.primary_contact %}{{ client.primary_contact.name }} · {{ client.primary_contact.phone or client.primary_contact.email or 'No contact details' }}{% else %}None recorded{% endif %} · Assigned sales: {{ assigned_sales_users|map(attribute='display_name')|join(', ') if assigned_sales_users else 'Unassigned' }}</p>
+</div><div class="head-actions">
+  {% if can('clients.edit') %}
+  <a class="btn" href="{{ url_for('client_detail', client_id=client.id, tab='activity', return_to=back_url) }}#log-interaction">Log interaction</a>
+  <a class="btn" href="{{ url_for('client_detail', client_id=client.id, tab='activity', return_to=back_url) }}#add-followup">Add follow-up</a>
+  <a class="btn" href="{{ url_for('client_detail', client_id=client.id, tab='profile', return_to=back_url) }}#edit-profile">Edit profile</a>
+  {% if status != 'supplier' and can('quotations.edit') %}<a class="btn primary" href="{{ url_for('quote_list', client_id=client.id) }}#new-quote">New quotation</a>{% endif %}
+  {% endif %}
+</div></div>
+<nav class="client-tabs" aria-label="{{ 'Supplier' if status == 'supplier' else 'Client' }} sections">
+  {% for key, label in section_tabs %}
+  <a class="{{ 'active' if tab == key }}" href="{{ url_for('client_detail', client_id=client.id, tab=key, return_to=back_url) }}">{{ label }}</a>{% endfor %}
+</nav>
+{% if tab in ('overview','purchases','payments') %}
+<div class="notice small">Period: {{ start or 'earliest available' }} to {{ end or 'latest available' }}. Latest successful import commit: {{ checkpoint or 'date unavailable' }}. {% if status == 'supplier' %}Supplier history uses approved source identities and creditor-side records only. Calculated pending amounts exclude unavailable opening balances.{% elif tab == 'purchases' and not show_financials %}This non-financial order history shows dates, references, products and quantities. Prices, totals, payment information and source voucher details remain restricted.{% else %}History uses reviewed vouchers, exact PartyId or GSTIN, and exact receipt names only when one source customer group has that name.{% endif %}</div>
+{% endif %}
+{% if tab in ('purchases','payments') %}
+<form class="card section-card card-body" method="get"><input type="hidden" name="tab" value="{{ tab }}"><input type="hidden" name="return_to" value="{{ back_url }}"><div class="form-grid three">
+  <div class="field"><label for="from">From</label><input id="from" type="date" name="from" value="{{ start }}"></div>
+  <div class="field"><label for="to">To</label><input id="to" type="date" name="to" value="{{ end }}"></div>
+  {% if tab == 'purchases' %}<div class="field"><label for="product">Product</label><input id="product" name="product" value="{{ product }}"></div>{% endif %}
+</div><div class="form-actions"><label class="inline-check"><input type="checkbox" name="cancelled" value="1" {{ 'checked' if cancelled }}> Include cancelled and uncertain records</label><button class="btn">Apply</button></div></form>
+{% endif %}
+{% if tab == 'overview' %}{% include 'client_tabs/supplier_overview.html' if status == 'supplier' else 'client_tabs/overview.html' %}{% elif tab == 'purchases' %}{% include 'client_tabs/supplier_purchases.html' if status == 'supplier' else ('client_tabs/purchases.html' if show_financials else 'client_tabs/order_history.html') %}{% elif tab == 'payments' %}{% include 'client_tabs/supplier_payments.html' if status == 'supplier' else 'client_tabs/payments.html' %}{% elif tab == 'quotations' %}{% include 'client_tabs/quotations.html' %}{% elif tab == 'activity' %}{% include 'client_tabs/activity.html' %}{% else %}{% include 'client_tabs/profile.html' %}{% endif %}
+{% endblock %}

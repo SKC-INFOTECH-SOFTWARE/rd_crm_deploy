@@ -1,0 +1,16 @@
+# Plain HTTP on 7060 inside the container (published as ${RD_PORT}, default 7060).
+# For a public domain with HTTPS, terminate TLS in the server's existing reverse
+# proxy (nginx/Apache) and forward to http://127.0.0.1:7060, then set
+# RD_COOKIE_SECURE=true in .env.
+http://:7060 {
+  encode zstd gzip
+  reverse_proxy web:8000
+  header {
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "same-origin"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    Content-Security-Policy "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+    -Server
+  }
+}

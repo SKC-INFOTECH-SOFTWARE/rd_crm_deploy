@@ -1,0 +1,27 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-head">
+  <div><div class="eyebrow">Supplier management</div><h1>Supplier directory</h1>
+    <p class="subhead">Only suppliers approved in the supplier catalog are shown here.</p></div>
+</div>
+<section class="card"><div class="card-head"><h2>Search approved suppliers</h2></div>
+  <form class="card-body" method="get"><div class="form-grid three">
+    <div class="field"><label for="q">Name, contact, phone, GSTIN or source code</label><input id="q" name="q" value="{{ filters.query }}"></div>
+    <div class="field"><label for="country">Country</label><input id="country" name="country" value="{{ filters.country }}"></div>
+    <div class="field"><label for="location">City or location</label><input id="location" name="location" value="{{ filters.location }}"></div>
+  </div><div class="form-actions"><button class="btn primary">Apply filters</button><a class="btn" href="{{ url_for('supplier_list') }}">Clear</a></div></form>
+</section>
+<div class="notice small section-card"><span>The approved supplier list controls supplied items, mobile numbers and exact accounting identities. Supplier payables are calculated separately from customer receivables. Opening balances are not supplied by the current Balance API.</span></div>
+<section class="card section-card"><div class="card-head"><div><h2>Approved suppliers</h2><p class="card-sub">{{ results.total }} matching records &middot; page {{ results.page }} of {{ results.pages }}</p></div></div>
+  {% if results.rows %}<div class="table-wrap"><table class="detail-table"><thead><tr><th>Supplier</th><th>Items / services</th><th>Contact</th><th>GSTIN</th><th>Location</th>{% if show_financials %}<th>Calculated pending</th>{% endif %}<th>Next follow-up</th><th></th></tr></thead><tbody>
+  {% for row in results.rows %}<tr><td><strong>{{ row.alias or row.name }}</strong>{% if row.alias %}<div class="cell-sub">{{ row.name }}</div>{% endif %}<div class="cell-sub">{% if row.kind == 'crm' %}CRM profile{% elif row.source_count > 1 %}{{ row.source_companies|replace(',', ' + ') }} &middot; {{ row.party_id }}{% else %}{{ row.source_company }} &middot; {{ row.party_id }}{% endif %}</div></td>
+    <td>{{ row.supplier_record['items']|join(', ') if row.supplier_record else '&mdash;'|safe }}</td>
+    <td>{% if row.contact_name %}{{ row.contact_name }}{% elif row.supplier_record and row.supplier_record.mobile %}Supplier office{% else %}&mdash;{% endif %}<div class="cell-sub">{{ row.contact_phone or (row.supplier_record.mobile if row.supplier_record else '') or row.contact_email or '' }}</div></td>
+    <td>{{ row.supplier_record.gstin if row.supplier_record and row.supplier_record.gstin else '&mdash;'|safe }}</td>
+    <td>{{ row.location or '&mdash;'|safe }}{% if row.country %}, {{ row.country }}{% endif %}</td>
+    {% if show_financials %}<td>{% if row.supplier_position and row.supplier_position.available %}{% for balance in row.supplier_position.balances %}{% if balance.pending > 0 %}<div><strong>{{ balance.pending }} {{ balance.currency }}</strong></div>{% elif balance.advance > 0 %}<div>{{ balance.advance }} {{ balance.currency }} advance</div>{% else %}<div>Settled &middot; {{ balance.currency }}</div>{% endif %}{% endfor %}{% else %}<span class="cell-sub">No matched activity</span>{% endif %}</td>{% endif %}
+    <td>{{ row.next_followup or 'None scheduled' }}</td>
+    <td><a class="btn small" href="{{ url_for('client_detail', client_id=row.client_id, return_to=back_url) if row.kind == 'crm' else url_for('imported_party_detail', company=row.source_company, party_id=row.party_id, return_to=back_url) }}">Open</a></td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty-card">No matching approved suppliers.</div>{% endif %}
+  <div class="card-foot head-actions">{% if results.page > 1 %}<a class="btn small" href="{{ url_for('supplier_list', **dict(request.args.to_dict(), page=results.page - 1)) }}">Previous</a>{% endif %}{% if results.page < results.pages %}<a class="btn small" href="{{ url_for('supplier_list', **dict(request.args.to_dict(), page=results.page + 1)) }}">Next</a>{% endif %}</div>
+</section>
+{% endblock %}
