@@ -50,30 +50,23 @@ Then: `docker compose restart scheduler web`.
 | Variable | Meaning |
 |---|---|
 | `RD_PORT` | Host port, default `7060` |
+| `RD_BIND_ADDRESS` | `0.0.0.0` (direct access) or `127.0.0.1` (only via server nginx) |
 | `RD_COOKIE_SECURE` | `false` for direct `http://ip:7060` access; `true` once HTTPS is in front |
 | `POSTGRES_PASSWORD`, `RD_DATABASE_URL` | Database credentials (generated) |
 | `RD_SECRET_KEY` | Session signing key, 32+ characters (generated) |
 | `RD_RELEASE`, `RD_IMAGE`, `RD_REVISION` | Must match `VERSION` and the deployed commit |
 | `RD_ADMIN_*` | First administrator, used only when no user exists |
 
-## HTTPS with a domain (optional)
+## HTTPS with a domain (www.rdcrm.co.in on CloudPanel)
 
-Keep the app on 7060 and let the server's existing nginx terminate TLS:
+Deploy with `sh deploy/first-deploy.sh --behind-https-proxy`. The app then listens on
+`127.0.0.1:7060` only and uses secure cookies. Paste
+[`deploy/nginx-vhost.conf`](deploy/nginx-vhost.conf) into CloudPanel → Sites →
+rdcrm.co.in → Vhost. All paths, including `/static/*`, must be proxied to the app;
+nginx overwrites `X-Forwarded-For` so login rate limits see each real client IP.
 
-```nginx
-server {
-    server_name crm.example.com;
-    location / {
-        proxy_pass http://127.0.0.1:7060;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-    # listen 443 ssl; certificates via certbot --nginx
-}
-```
-
-Then set `RD_COOKIE_SECURE=true` and run `docker compose up -d web`.
+For an existing deployment, set `RD_BIND_ADDRESS=127.0.0.1` and `RD_COOKIE_SECURE=true`
+in `.env`, then run `docker compose up -d`.
 
 ## Updates
 

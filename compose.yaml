@@ -101,7 +101,7 @@ services:
     restart: unless-stopped
     # Only this port is published on the host; 80/443 stay free for other sites.
     ports:
-      - "${RD_PORT:-7060}:7060"
+      - "${RD_BIND_ADDRESS:-0.0.0.0}:${RD_PORT:-7060}:7060"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

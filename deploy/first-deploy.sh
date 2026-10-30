@@ -1,7 +1,10 @@
 #!/usr/bin/env sh
 # First deployment of RDIC CRM with Docker Compose.
 #
-#   sh deploy/first-deploy.sh            # app on port 7060 (RD_PORT in .env)
+#   sh deploy/first-deploy.sh            # app on http://<server-ip>:7060
+#   sh deploy/first-deploy.sh --behind-https-proxy
+#                                        # app on 127.0.0.1:7060 only, served by the
+#                                        # server's nginx over HTTPS (secure cookies)
 #
 # - Creates .env with generated secrets when it does not exist yet.
 # - Creates empty runtime-config files that are missing (review them later).
@@ -34,6 +37,14 @@ else
   revision="manual-$(date -u +%Y%m%d%H%M%S)"
 fi
 
+bind_address=0.0.0.0
+cookie_secure=false
+case "${1:-}" in
+  '') ;;
+  --behind-https-proxy) bind_address=127.0.0.1; cookie_secure=true ;;
+  *) echo "Unknown option: $1" >&2; exit 2 ;;
+esac
+
 if [ ! -f .env ]; then
   postgres_password=$(random_hex 24)
   umask 077
@@ -44,8 +55,10 @@ RD_DATABASE_URL=postgresql+psycopg://rdic:$postgres_password@database:5432/rdic
 RD_SECRET_KEY=$(random_hex 32)
 # Host port for the app. Only this port is used on the server.
 RD_PORT=7060
-# false = direct http://server-ip:7060 access. Set true once HTTPS is in front.
-RD_COOKIE_SECURE=false
+# 127.0.0.1 = reachable only through the server nginx (recommended with a domain).
+RD_BIND_ADDRESS=$bind_address
+# false = direct http://server-ip:7060 access. true when HTTPS is in front.
+RD_COOKIE_SECURE=$cookie_secure
 RD_IMAGE=rdic-crm:$release
 RD_RELEASE=$release
 RD_REVISION=$revision
@@ -112,6 +125,12 @@ docker compose ps
 port=$(sed -n 's/^RD_PORT=//p' .env | tail -n 1 | tr -d '\r')
 admin_user=$(sed -n 's/^RD_ADMIN_USERNAME=//p' .env | tail -n 1 | tr -d '\r')
 echo
-echo "RDIC CRM $release ($revision) is running on port ${port:-7060}: http://<server-ip>:${port:-7060}"
+bound=$(sed -n 's/^RD_BIND_ADDRESS=//p' .env | tail -n 1 | tr -d '\r')
+if [ "$bound" = "127.0.0.1" ]; then
+  echo "RDIC CRM $release ($revision) is running on 127.0.0.1:${port:-7060}."
+  echo "Point the server nginx vhost at http://127.0.0.1:${port:-7060} and open the HTTPS domain."
+else
+  echo "RDIC CRM $release ($revision) is running on port ${port:-7060}: http://<server-ip>:${port:-7060}"
+fi
 echo "Sign in as '$admin_user'. If the seed password is still the temporary one,"
 echo "change it from the Users page now, then clear RD_ADMIN_PASSWORD in .env."

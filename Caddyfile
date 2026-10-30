@@ -1,10 +1,21 @@
 # Plain HTTP on 7060 inside the container (published as ${RD_PORT}, default 7060).
 # For a public domain with HTTPS, terminate TLS in the server's existing reverse
 # proxy (nginx/Apache) and forward to http://127.0.0.1:7060, then set
-# RD_COOKIE_SECURE=true in .env.
+# RD_COOKIE_SECURE=true and RD_BIND_ADDRESS=127.0.0.1 in .env.
+{
+  servers {
+    # A host reverse proxy reaches this container from a private Docker address.
+    # Trust its X-Forwarded-For so login rate limits see each real client IP.
+    trusted_proxies static private_ranges
+  }
+}
+
 http://:7060 {
   encode zstd gzip
-  reverse_proxy web:8000
+  reverse_proxy web:8000 {
+    # One clean hop for the app (wsgi.py ProxyFix trusts exactly one proxy).
+    header_up X-Forwarded-For {client_ip}
+  }
   header {
     X-Content-Type-Options "nosniff"
     X-Frame-Options "DENY"
