@@ -13,6 +13,7 @@
 # Safe to re-run: existing .env, config files, data and users are kept.
 # Use deploy/update.sh for later releases.
 # Only port 7060 is published, so 80/443 and other services stay untouched.
+
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -92,7 +93,7 @@ seed_config() {
 if [ ! -f runtime-config/import_config.json ]; then
   cp config.example.json runtime-config/import_config.json
   echo "Created runtime-config/import_config.json from config.example.json."
-  echo "  -> Set the real Balance API base_url before go-live."
+  echo "  -> Uses the production Balance API: https://rdindustrial.balanceerp.com/api"
 fi
 seed_config client_data_overrides.json '{"version": 1, "clients": []}'
 seed_config client_identity_groups.json '{"version": 2, "groups": []}'

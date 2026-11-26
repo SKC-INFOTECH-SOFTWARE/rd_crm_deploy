@@ -478,8 +478,11 @@ def link_voucher(engine, client_id: int, voucher_id: int, basis: str) -> None:
     with db.transaction(engine) as c:
         voucher = c.execute(select(source_db.vouchers).where(
             source_db.vouchers.c.id == voucher_id)).mappings().first()
-        if voucher is None or voucher['endpoint'] not in ('sale', 'receivevoucher', 'salereturn', 'taxablecn'):
-            raise CRMError('Select a current customer sale, return, credit note or receipt.')
+        if voucher is None or voucher['endpoint'] not in ('sale', 'receivevoucher', 'salereturn', 'taxablecn', 'journalvoucher'):
+            raise CRMError('Select a current customer sale, return, credit note, receipt or single-customer journal.')
+        if c.execute(select(db.supplier_receipt_links.c.voucher_id).where(
+                db.supplier_receipt_links.c.voucher_id == voucher_id)).first():
+            raise CRMError('This receipt belongs to supplier review. Use Data review to confirm it.')
         if (voucher['endpoint'] == 'taxablecn' and
                 str(loads(voucher['payload_json']).get('iotype') or '').strip().upper() != 'O'):
             raise CRMError('An inward taxable credit note belongs to supplier activity, not customer receivables.')
@@ -488,9 +491,47 @@ def link_voucher(engine, client_id: int, voucher_id: int, basis: str) -> None:
             db.party_links.c.company == voucher['company'])).mappings()]
         if not links:
             raise CRMError('Link this client to the exact imported party in this source company first.')
+        customer_party = c.execute(select(source_db.parties.c.id).where(
+            source_db.parties.c.company == voucher['company'],
+            source_db.parties.c.party_id.in_([row['party_id'] for row in links]),
+            func.upper(func.trim(source_text(source_db.parties.c.payload_json, 'PartyType'))) == 'CUSTOMER')).first()
+        if not customer_party:
+            raise CRMError('Use the supplier receipt confirmation in Data review for supplier activity.')
         source_party_id = loads(voucher['payload_json']).get('PartyId')
         if source_party_id and str(source_party_id) not in {row['party_id'] for row in links}:
             raise CRMError('Source PartyId conflicts with this client’s confirmed party link.')
+        if voucher['endpoint'] == 'journalvoucher':
+            # A voucher-level confirmation is safe only when there is exactly one
+            # customer debtor line. Mixed-customer journals require line-level review.
+            debtor_lines = []
+            has_supplier_line = False
+            for ledger in c.execute(select(source_db.ledgers).where(
+                    source_db.ledgers.c.voucher_id == voucher_id)).mappings():
+                details = loads(ledger['payload_json']).get('LEDGERDETAILS') or {}
+                group = str(details.get('GROUP') or '').strip().casefold()
+                if group in ('sundry creditor', 'sundry creditors'):
+                    has_supplier_line = True
+                if group in ('sundry debtor', 'sundry debtors'):
+                    debtor_lines.append((ledger, details))
+            if has_supplier_line:
+                raise CRMError('Journals containing supplier lines require separate ledger-line review.')
+            if len(debtor_lines) != 1:
+                raise CRMError('Only journals with exactly one customer debtor line can be confirmed here.')
+            ledger, details = debtor_lines[0]
+            parties = [party for party in c.execute(select(source_db.parties.c.name, source_db.parties.c.payload_json).where(
+                source_db.parties.c.company == voucher['company'],
+                source_db.parties.c.party_id.in_([row['party_id'] for row in links]))).mappings()
+                if str(loads(party['payload_json']).get('PartyType') or '').strip().upper() == 'CUSTOMER']
+            if _normalized_party_name(ledger['name']) not in {
+                    _normalized_party_name(party['name']) for party in parties}:
+                raise CRMError('The journal debtor name does not match this client’s confirmed source parties.')
+            tax = ''.join(str(details.get('GSTIN') or '').upper().split())
+            allowed_taxes = {''.join(str(payload.get('TaxRegistrationNumber') or payload.get('PAN') or '')
+                .upper().split()) for payload in (loads(party['payload_json']) for party in parties)}
+            if tax and tax not in allowed_taxes:
+                raise CRMError('The journal GSTIN conflicts with this client’s confirmed source parties.')
+            if str(ledger['movement'] or '').strip().casefold() not in ('debit', 'credit'):
+                raise CRMError('The journal debtor line needs a valid debit or credit movement.')
         old = c.execute(select(db.voucher_links).where(
             db.voucher_links.c.voucher_id == voucher_id)).mappings().first()
         if old and old['client_id'] != client_id:

@@ -136,6 +136,27 @@ def set_role(engine, user_id: int, role_name: str, actor_user_id: int) -> None:
                {'role': role_name})
 
 
+def set_pipeline_approval(engine, user_id: int, approved: bool,
+                          actor_user_id: int | None) -> None:
+    """Approve a specific account; its role still limits what it can do."""
+    with engine.begin() as connection:
+        if connection.execute(select(db.users.c.id).where(
+                db.users.c.id == user_id)).scalar() is None:
+            raise ValueError('User was not found.')
+        existing = connection.execute(select(db.pipeline_approvals.c.user_id).where(
+            db.pipeline_approvals.c.user_id == user_id)).scalar() is not None
+        if existing == approved:
+            return
+        if approved:
+            connection.execute(insert(db.pipeline_approvals).values(user_id=user_id,
+                approved_by=actor_user_id, approved_at=now()))
+        else:
+            connection.execute(delete(db.pipeline_approvals).where(
+                db.pipeline_approvals.c.user_id == user_id))
+        _audit(connection, 'pipeline_approved' if approved else 'pipeline_revoked',
+               actor_user_id, user_id)
+
+
 def user_record(engine, user_id: int):
     with engine.connect() as connection:
         row = connection.execute(select(db.users).where(
@@ -150,9 +171,14 @@ def user_record(engine, user_id: int):
             .select_from(db.user_roles.join(db.roles,
                 db.user_roles.c.role_id == db.roles.c.id))
             .where(db.user_roles.c.user_id == user_id)).scalars())
+        pipeline_approved = connection.execute(select(db.pipeline_approvals.c.user_id).where(
+            db.pipeline_approvals.c.user_id == user_id)).scalar() is not None
+        if not pipeline_approved:
+            permissions.difference_update({'pipeline.view', 'pipeline.manage'})
     result = dict(row)
     result['permissions'] = permissions
     result['roles'] = role_names
+    result['pipeline_approved'] = pipeline_approved
     return result
 
 
@@ -288,6 +314,10 @@ def authenticate(engine, username: str, password: str, remote: str,
 
 
 ROUTE_PERMISSIONS = {
+    'production_board': 'pipeline.view', 'production_order': 'pipeline.view',
+    'new_production_order': 'pipeline.manage', 'create_production_order': 'pipeline.manage',
+    'edit_production_order': 'pipeline.manage',
+    'change_production_order': 'pipeline.manage',
     'overview': 'dashboard.view',
     'client_list': 'clients.view', 'supplier_list': 'clients.identity_view',
     'party_search': 'clients.identity_view', 'imported_party_detail': 'clients.identity_view',
@@ -310,6 +340,10 @@ ROUTE_PERMISSIONS = {
     'save_recipe_version': 'recipes.manage',
     'set_recipe_active': 'recipes.manage',
     'data_review': 'data_review.manage', 'decide_quarantine': 'data_review.manage',
+    'confirm_supplier_receipt': 'data_review.manage',
+    'source_ledgers': 'data_review.manage', 'source_ledger_template': 'data_review.manage',
+    'import_source_ledger': 'data_review.manage', 'confirm_source_ledger': 'data_review.manage',
+    'source_ledger_export': 'data_review.manage',
     'stock_balances': 'stock.view', 'sync_status': 'sync.run',
     'request_sync': 'sync.run', 'user_admin': 'users.manage',
     'create_user_route': 'users.manage', 'change_user': 'users.manage',
@@ -417,6 +451,11 @@ def init_app(app, enabled: bool) -> None:
                 .group_by(db.users.c.id).order_by(db.users.c.username)).mappings()]
             role_rows = [dict(row) for row in connection.execute(select(
                 db.roles.c.name, db.roles.c.description).order_by(db.roles.c.name)).mappings()]
+            approvals = {row['user_id']: row['approved_at'] for row in connection.execute(
+                select(db.pipeline_approvals.c.user_id, db.pipeline_approvals.c.approved_at)).mappings()}
+            for row in rows:
+                row['pipeline_approved'] = row['id'] in approvals
+                row['pipeline_approved_at'] = approvals.get(row['id'])
         return render_template('users.html', page='Users', users=rows, roles=role_rows,
             csrf=session['csrf_token'], today=datetime.now().date(), checkpoint=None,
             client_directory_url=session.get('client_directory_url', url_for('client_list')))
@@ -432,6 +471,13 @@ def init_app(app, enabled: bool) -> None:
     @app.post('/admin/users/<int:user_id>')
     def change_user(user_id):
         action = request.form.get('action', '')
+        if action == 'pipeline_access':
+            selected = request.form.get('approved')
+            if selected not in ('0', '1'):
+                raise ValueError('Choose whether this user is approved for the production pipeline.')
+            set_pipeline_approval(engine(), user_id, selected == '1', g.current_user['id'])
+            flash('Production pipeline access ' + ('approved.' if selected == '1' else 'revoked.'), 'success')
+            return redirect(url_for('user_admin'), code=303)
         if action == 'deactivate':
             set_active(engine(), user_id, False, g.current_user['id'])
         elif action == 'activate':

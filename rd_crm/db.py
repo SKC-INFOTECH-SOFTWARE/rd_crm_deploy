@@ -42,6 +42,15 @@ voucher_link_events = table('voucher_link_events', C('id', I, primary_key=True),
                              C('voucher_id', I, nullable=False), C('client_id', I, nullable=False),
                              C('source_hash', T, nullable=False), C('basis', T, nullable=False),
                              C('action', T, nullable=False), C('at', T, nullable=False))
+supplier_receipt_links = table('supplier_receipt_links',
+    C('voucher_id', FK(source_db.vouchers.c.id), primary_key=True),
+    C('client_id', FK(clients.c.id), nullable=False), C('source_hash', T, nullable=False),
+    C('basis', T, nullable=False), C('confirmed_at', T, nullable=False),
+    C('confirmed_by', I))
+supplier_receipt_events = table('supplier_receipt_events', C('id', I, primary_key=True),
+    C('voucher_id', I, nullable=False), C('client_id', I, nullable=False),
+    C('source_hash', T, nullable=False), C('basis', T, nullable=False),
+    C('action', T, nullable=False), C('at', T, nullable=False), C('actor_user_id', I))
 opportunities = table('opportunities', C('id', I, primary_key=True), C('client_id', FK(clients.c.id), nullable=False),
                       C('kind', T, nullable=False), C('title', T, nullable=False), C('status', T, nullable=False),
                       C('notes', T), C('created_at', T, nullable=False), C('updated_at', T, nullable=False))
@@ -91,6 +100,9 @@ role_permissions = table('role_permissions', C('role_id', FK(roles.c.id, ondelet
                          C('permission', T, primary_key=True))
 user_roles = table('user_roles', C('user_id', FK(users.c.id, ondelete='CASCADE'), primary_key=True),
                    C('role_id', FK(roles.c.id, ondelete='CASCADE'), primary_key=True))
+pipeline_approvals = table('pipeline_approvals',
+    C('user_id', FK(users.c.id, ondelete='CASCADE'), primary_key=True),
+    C('approved_by', FK(users.c.id)), C('approved_at', T, nullable=False))
 client_assignments = table('client_assignments',
     C('client_id', FK(clients.c.id, ondelete='CASCADE'), primary_key=True),
     C('user_id', FK(users.c.id, ondelete='CASCADE'), primary_key=True),
@@ -108,6 +120,38 @@ login_attempts = table('login_attempts', C('id', I, primary_key=True), C('userna
 login_captcha_challenges = table('login_captcha_challenges',
     C('id', T, primary_key=True), C('answer_hash', T, nullable=False),
     C('remote_fingerprint', T, nullable=False), C('created_at', T, nullable=False))
+production_orders = table('production_orders',
+    C('id', I, primary_key=True), C('client_id', FK(clients.c.id), nullable=False),
+    C('reference', T), C('product', T, nullable=False), C('quantity', T, nullable=False),
+    C('unit', T, nullable=False), C('due_date', T, nullable=False), C('owner', T),
+    C('stage', T, nullable=False), C('hold_reason', T), C('notes', T),
+    C('payment_status', T, nullable=False, server_default='not_recorded'),
+    C('ship_name', T), C('shipped_date', T), C('expected_arrival_date', T),
+    C('tracking_reference', T), C('dispatch_notes', T), C('dispatch_updated_at', T),
+    C('tracking_url', T), C('container_number', T), C('current_location', T),
+    C('actual_arrival_date', T), C('delivered_date', T), C('tracking_updated_at', T),
+    C('invoice_reference', T), C('payment_currency', T), C('order_value', T),
+    C('amount_received', T), C('payment_due_date', T), C('payment_received_date', T),
+    C('payment_reference', T), C('payment_notes', T), C('payment_updated_at', T),
+    C('version', I, nullable=False), C('created_at', T, nullable=False),
+    C('updated_at', T, nullable=False))
+production_events = table('production_events',
+    C('id', I, primary_key=True), C('order_id', FK(production_orders.c.id), nullable=False),
+    C('action', T, nullable=False), C('detail_json', T, nullable=False),
+    C('actor_user_id', FK(users.c.id)), C('at', T, nullable=False))
+ledger_imports = table('ledger_imports',
+    C('id', I, primary_key=True), C('source_name', T, nullable=False),
+    C('source_reference', T, nullable=False), C('source_hash', T, nullable=False),
+    C('period_start', T, nullable=False), C('period_end', T, nullable=False),
+    C('status', T, nullable=False), C('created_by', FK(users.c.id)),
+    C('created_at', T, nullable=False), C('confirmed_by', FK(users.c.id)),
+    C('confirmed_at', T))
+ledger_balances = table('ledger_balances',
+    C('id', I, primary_key=True), C('import_id', FK(ledger_imports.c.id), nullable=False),
+    C('row_number', I, nullable=False), C('company', T, nullable=False),
+    C('party_id', T, nullable=False), C('currency', T, nullable=False),
+    C('opening', T, nullable=False), C('closing', T, nullable=False),
+    C('payload_json', T, nullable=False), U('import_id', 'company', 'party_id', 'currency'))
 
 Index('crm_followups_due', followups.c.status, followups.c.due_date)
 Index('crm_activities_client', activities.c.client_id, activities.c.occurred_at)
@@ -119,6 +163,9 @@ Index('crm_login_captcha_created', login_captcha_challenges.c.created_at)
 Index('crm_auth_events_at', auth_events.c.at)
 Index('crm_client_assignments_user', client_assignments.c.user_id)
 Index('crm_payment_due_dates_due', payment_due_dates.c.due_date)
+Index('crm_production_orders_stage_due', production_orders.c.stage, production_orders.c.due_date)
+Index('crm_production_orders_client', production_orders.c.client_id)
+Index('crm_production_events_order', production_events.c.order_id, production_events.c.id)
 
 
 PERMISSIONS = (
@@ -128,6 +175,7 @@ PERMISSIONS = (
     'quotations.view', 'quotations.edit', 'quotations.price_edit',
     'costs.view', 'recipes.manage', 'stock.view', 'sync.run', 'users.manage',
     'data_review.manage',
+    'pipeline.view', 'pipeline.manage',
 )
 
 DEFAULT_ROLES = {
@@ -143,13 +191,17 @@ DEFAULT_ROLES = {
                    'clients.edit', 'clients.assign', 'orders.view', 'financial.view',
                    'financial.export', 'followups.manage', 'quotations.view',
                    'quotations.edit', 'quotations.price_edit', 'costs.view',
-                   'stock.view'},
+                   'stock.view', 'pipeline.view', 'pipeline.manage'},
     'Accounts': {'dashboard.view', 'clients.view', 'clients.identity_view',
                  'orders.view', 'financial.view', 'financial.export', 'quotations.view'},
     'Operations': {'dashboard.view', 'clients.view', 'clients.identity_view',
                    'clients.edit', 'stock.view', 'quotations.view'},
     'Read-only': {'dashboard.view', 'clients.view', 'quotations.view'},
 }
+
+for _role in ('Sales', 'External Sales', 'Accounts', 'Operations'):
+    DEFAULT_ROLES[_role].add('pipeline.view')
+DEFAULT_ROLES['Operations'].add('pipeline.manage')
 
 
 def now() -> str:
@@ -160,7 +212,7 @@ def ready(engine) -> bool:
     if not inspect(engine).has_table(versions.name):
         return False
     with engine.connect() as c:
-        return c.execute(select(versions.c.version).where(versions.c.version == 11)).scalar() == 11
+        return c.execute(select(versions.c.version).where(versions.c.version == 17)).scalar() == 17
 
 
 def _seed_roles(connection) -> None:
@@ -319,6 +371,46 @@ def migrate(engine) -> None:
             # being replayed or its answer from being recovered from page markup.
             metadata.create_all(c)
             c.execute(insert(versions).values(version=11, applied_at=now()))
+        if c.execute(select(versions.c.version).where(versions.c.version == 12)).scalar() is None:
+            # Production progress is CRM-owned; it never changes accounting or stock.
+            for role_name, permissions in DEFAULT_ROLES.items():
+                role_id = c.execute(select(roles.c.id).where(roles.c.name == role_name)).scalar()
+                if role_id is None:
+                    continue
+                existing = set(c.execute(select(role_permissions.c.permission).where(
+                    role_permissions.c.role_id == role_id)).scalars())
+                for permission in (permissions & {'pipeline.view', 'pipeline.manage'}) - existing:
+                    c.execute(insert(role_permissions).values(role_id=role_id, permission=permission))
+            c.execute(insert(versions).values(version=12, applied_at=now()))
+        if c.execute(select(versions.c.version).where(versions.c.version == 13)).scalar() is None:
+            order_columns = {column['name'] for column in inspect(c).get_columns(production_orders.name)}
+            if 'payment_status' not in order_columns:
+                c.exec_driver_sql("ALTER TABLE crm_production_orders ADD COLUMN "
+                                  "payment_status TEXT NOT NULL DEFAULT 'not_recorded'")
+            for name in ('ship_name', 'shipped_date', 'expected_arrival_date',
+                         'tracking_reference', 'dispatch_notes', 'dispatch_updated_at'):
+                if name not in order_columns:
+                    c.exec_driver_sql(f'ALTER TABLE crm_production_orders ADD COLUMN {name} TEXT')
+            c.execute(insert(versions).values(version=13, applied_at=now()))
+        if c.execute(select(versions.c.version).where(versions.c.version == 14)).scalar() is None:
+            # No role or existing account is automatically approved for this workspace.
+            c.execute(insert(versions).values(version=14, applied_at=now()))
+        if c.execute(select(versions.c.version).where(versions.c.version == 15)).scalar() is None:
+            # Independent source ledger snapshots never change accounting amounts.
+            c.execute(insert(versions).values(version=15, applied_at=now()))
+        if c.execute(select(versions.c.version).where(versions.c.version == 16)).scalar() is None:
+            columns = {column['name'] for column in inspect(c).get_columns(production_orders.name)}
+            for name in ('tracking_url', 'container_number', 'current_location',
+                         'actual_arrival_date', 'delivered_date', 'tracking_updated_at',
+                         'invoice_reference', 'payment_currency', 'order_value', 'amount_received',
+                         'payment_due_date', 'payment_received_date', 'payment_reference',
+                         'payment_notes', 'payment_updated_at'):
+                if name not in columns:
+                    c.exec_driver_sql(f'ALTER TABLE crm_production_orders ADD COLUMN {name} TEXT')
+            c.execute(insert(versions).values(version=16, applied_at=now()))
+        if c.execute(select(versions.c.version).where(versions.c.version == 17)).scalar() is None:
+            # Explicit supplier receipts stay separate from customer voucher approvals.
+            c.execute(insert(versions).values(version=17, applied_at=now()))
 
 
 WRITE_LOCK_WAIT_SECONDS = 15

@@ -1,0 +1,21 @@
+<section class="card section-card" id="supplier-receipts">
+  <div class="card-head"><div><h2>Incoming supplier receipts</h2><p class="card-sub">{{ supplier_incoming.total }} reviewed incoming receipts</p></div></div>
+  {% if supplier_incoming.rows %}
+  <div class="table-wrap"><table class="detail-table">
+    <thead><tr><th>Date / receipt</th><th>Company</th><th>Amount received</th><th>Bank and reference</th><th>Source allocations</th><th></th></tr></thead>
+    <tbody>{% for row in supplier_incoming.rows %}<tr id="supplier-receipt-{{ row.id }}">
+      <td>{{ row.display_date or 'Unknown' }}<div class="cell-sub">{{ row.number or 'No number' }}</div></td>
+      <td>{{ row.company }}</td>
+      <td>{% if row.payments %}{% for payment in row.payments %}<div>{{ payment.amount|indian_amount if payment.amount is not none else 'Unavailable' }} {{ payment.currency or row.currency or 'Unknown currency' }}</div>{% endfor %}{% else %}{{ row.amount|indian_amount if row.amount is not none else 'Unavailable' }} {{ row.currency or 'Unknown currency' }}{% endif %}</td>
+      <td>{% for payment in row.payments %}<div>{{ payment.mode or 'Mode unavailable' }} &middot; {{ payment.transaction_id or 'No transaction reference' }}</div>{% else %}<span class="cell-sub">No payment details supplied</span>{% endfor %}</td>
+      <td>{% for payment in row.payments %}{% for allocation in payment.allocations %}<div>{{ allocation.reference_number or 'No reference' }} &middot; {{ allocation.amount|indian_amount if allocation.amount is not none else 'Amount unavailable' }} ({{ allocation.reference_type or 'Unmatched' }})</div>{% endfor %}{% endfor %}</td>
+      <td><a class="btn small" href="{{ url_for('client_voucher', client_id=client.id, voucher_id=row.id) }}">Full receipt</a></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="empty-card">No reviewed incoming supplier receipts match these filters. Approve incoming receipts from Data review.</div>{% endif %}
+  <div class="card-body"><p class="muted-note">These receipts increase the supplier account balance and reduce any supplier advance. Source references remain unchanged; inclusion does not allocate a receipt against a specific bill or outgoing payment.</p></div>
+  <div class="card-foot head-actions">
+    {% if supplier_incoming.page > 1 %}<a class="btn small" href="{{ url_for('client_detail', client_id=client.id, tab='payments', supplier_receipts_page=supplier_incoming.page-1, return_to=back_url, **{'from':start,'to':end,'cancelled':'1' if cancelled else ''}) }}#supplier-receipts">Previous</a>{% endif %}
+    {% if supplier_incoming.page < supplier_incoming.pages %}<a class="btn small" href="{{ url_for('client_detail', client_id=client.id, tab='payments', supplier_receipts_page=supplier_incoming.page+1, return_to=back_url, **{'from':start,'to':end,'cancelled':'1' if cancelled else ''}) }}#supplier-receipts">Next</a>{% endif %}
+  </div>
+</section>

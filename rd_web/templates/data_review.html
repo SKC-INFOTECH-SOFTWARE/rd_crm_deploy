@@ -2,10 +2,13 @@
 <div class="page-head">
 <div>
 <div class="eyebrow">Imported-data controls</div>
-<h1>Quarantine review</h1>
-<p class="subhead">Review rows held back by the importer. Decisions affect this local database only and never write to Balance.</p>
+<h1>Data review</h1>
+<p class="subhead">Automatic checks across all customer profiles and unassigned accounting entries. Decisions affect this local database only and never write to Balance.</p>
 </div>
 </div>
+{% include 'source_ledger_summary.html' %}
+{% include 'balance_review.html' %}
+<div class="page-head section-card"><div><h2>Quarantine review</h2><p class="subhead">Source rows held back by the importer. These are separate from imported entries awaiting client matching above.</p></div></div>
 <div class="metrics">
 <div class="metric highlight"><div class="metric-top">Awaiting review <span>!</span></div><div class="metric-value">{{ review.total }}</div><div class="metric-foot">Unique source rows</div></div>
 <div class="metric"><div class="metric-top">Can be approved</div><div class="metric-value">{{ review.approvable }}</div><div class="metric-foot">Voucher-number conflicts</div></div>
@@ -19,7 +22,7 @@
 <tbody>{% for row in review.rows %}<tr>
 <td><div class="cell-title">{{ row.company }} · {{ row.endpoint }}</div><div class="cell-sub">Imported {{ row.started_at }} · row {{ row.row_index }}</div><details class="source-detail"><summary>Raw source data</summary><pre class="source-json">{{ row.payload_pretty }}</pre></details></td>
 <td><div class="cell-title">{{ row.number or 'Missing number' }}</div><div class="cell-sub">{{ row.date or 'No date' }}</div></td>
-<td><div>{{ row.party or 'Not supplied' }}</div><div class="cell-sub">{{ row.amount if row.amount is not none else 'Amount not supplied' }}</div></td>
+<td><div>{{ row.party or 'Not supplied' }}</div><div class="cell-sub">{{ row.amount|indian_amount if row.amount is not none else 'Amount not supplied' }}</div></td>
 <td>{% for issue in row.issues %}<div class="review-issue"><span class="pill {{ 'amber' if 'possible_identity' in issue else 'red' if issue.startswith('missing_') or issue.startswith('invalid_') else '' }}">{{ issue|replace('_',' ') }}</span><div class="cell-sub">{{ explain_issue(issue) }}</div></div>{% endfor %}</td>
 <td><form class="review-actions" method="post" action="{{ url_for('decide_quarantine', source_id=row.id) }}">
 <input type="hidden" name="csrf_token" value="{{ csrf }}">

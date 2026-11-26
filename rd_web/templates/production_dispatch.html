@@ -1,0 +1,40 @@
+<section class="card pipeline-dispatch" id="dispatch">
+<div class="card-head"><div><h2>Shipment &amp; payment</h2><p class="card-sub">Track this order through delivery and settlement.</p></div><span class="pipeline-tag {{ 'payment-complete' if order.payment_status == 'complete' else 'tag-hold' if order.payment_status in ('pending','partial') }}">{{ order.payment_status_label }}</span></div>
+<div class="card-body">
+<h3 class="pipeline-section-title">Shipment tracking</h3>
+<dl class="pipeline-facts">{% for key,label in [('ship_name','Ship / carrier'),('container_number','Container number'),('shipped_date','Shipping date'),('expected_arrival_date','Expected arrival'),('current_location','Current location'),('tracking_reference','Tracking / bill of lading / LR'),('actual_arrival_date','Actual arrival'),('delivered_date','Delivered')] %}<div><dt>{{ label }}</dt><dd>{{ order[key] or 'Not recorded' }}{% if key == 'expected_arrival_date' and order.arrival_overdue %} <span class="pipeline-tag tag-late">Arrival overdue</span>{% endif %}</dd></div>{% endfor %}</dl>
+{% if order.tracking_url %}<a class="btn small pipeline-tracking-link" href="{{ order.tracking_url }}" target="_blank" rel="noopener noreferrer">Open carrier tracking &nearr;</a>{% endif %}
+{% if order.dispatch_notes %}<p class="pipeline-notes">{{ order.dispatch_notes }}</p>{% endif %}
+{% if order.tracking_updated_at %}<p class="pipeline-dispatch-updated">Tracking updated <time datetime="{{ order.tracking_updated_at }}">{{ order.tracking_updated_at_display }}</time></p>{% endif %}
+<h3 class="pipeline-section-title payment-heading">Payment details</h3>
+{% if can('financial.view') %}
+<dl class="pipeline-facts">
+<div><dt>Invoice reference</dt><dd>{{ order.invoice_reference or 'Not recorded' }}</dd></div>
+<div><dt>Payment due date</dt><dd>{{ order.payment_due_date or 'Not recorded' }}{% if order.payment_overdue %} <span class="pipeline-tag tag-late">Payment overdue</span>{% endif %}</dd></div>
+{% for key,label in [('order_value_amount','Order value'),('amount_received_amount','Amount received'),('amount_due','Amount due')] %}<div><dt>{{ label }}</dt><dd>{{ order[key]|indian_amount if order[key] is not none else 'Not recorded' }} {{ order.payment_currency or '' }}</dd></div>{% endfor %}
+{% if order.payment_credit %}<div><dt>Credit</dt><dd>{{ order.payment_credit|indian_amount }} {{ order.payment_currency }}</dd></div>{% endif %}
+<div><dt>Payment received date</dt><dd>{{ order.payment_received_date or 'Not recorded' }}</dd></div>
+<div><dt>Payment / bank reference</dt><dd>{{ order.payment_reference or 'Not recorded' }}</dd></div>
+</dl>
+{% if order.payment_notes %}<p class="pipeline-notes">{{ order.payment_notes }}</p>{% endif %}
+{% if order.payment_updated_at %}<p class="pipeline-dispatch-updated">Payment details updated <time datetime="{{ order.payment_updated_at }}">{{ order.payment_updated_at_display }}</time></p>{% endif %}
+{% else %}<p class="pipeline-footnote">{{ order.payment_status_label }}. Payment amounts and bank references are restricted to financial users.</p>{% endif %}
+<p class="pipeline-dispatch-updated">{% if order.dispatch_updated_at %}Dispatch details updated <time datetime="{{ order.dispatch_updated_at }}">{{ order.dispatch_updated_at_display }}</time>{% else %}Shipment and payment details have not been filled in yet.{% endif %}</p>
+{% if can('pipeline.manage') %}<details class="pipeline-dispatch-edit" {{ 'open' if not order.dispatch_updated_at }}><summary>Edit shipment &amp; payment details</summary>
+<form method="post" action="{{ url_for('change_production_order', order_id=order.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="version" value="{{ order.version }}"><input type="hidden" name="action" value="dispatch">
+<fieldset class="pipeline-fieldset"><legend>Shipment tracking</legend><div class="form-grid">
+{% for key,label,kind,maximum in [('ship_name','Ship / carrier','text',160),('container_number','Container number','text',120),('shipped_date','Shipping date','date',0),('expected_arrival_date','Expected arrival','date',0),('current_location','Current location','text',160),('tracking_reference','Tracking / bill of lading / LR','text',240),('tracking_url','Carrier tracking link','url',2000),('actual_arrival_date','Actual arrival','date',0),('delivered_date','Delivery date','date',0)] %}<div class="field {{ 'dispatch-wide' if key == 'tracking_url' }}"><label for="dispatch-{{ key }}">{{ label }}</label><input id="dispatch-{{ key }}" name="{{ key }}" type="{{ kind }}" value="{{ order[key] or '' }}" {% if maximum %}maxlength="{{ maximum }}"{% endif %} {% if key in ('actual_arrival_date','delivered_date') %}max="{{ today }}"{% endif %}></div>{% endfor %}
+<div class="field dispatch-wide"><label for="dispatch-notes">Shipment notes</label><textarea id="dispatch-notes" name="dispatch_notes" maxlength="4000" rows="3">{{ order.dispatch_notes or '' }}</textarea></div>
+</div></fieldset>
+<fieldset class="pipeline-fieldset"><legend>Payment details</legend><div class="form-grid">
+<div class="field"><label for="dispatch-payment">Payment status</label><select id="dispatch-payment" name="payment_status" required>{% for key,label in payment_statuses %}<option value="{{ key }}" {{ 'selected' if order.payment_status == key }}>{{ label }}</option>{% endfor %}</select></div>
+{% if can('financial.view') %}
+{% for key,label,kind,maximum in [('invoice_reference','Invoice reference','text',120),('payment_currency','Currency (INR / USD / EUR)','text',3),('order_value','Order value','text',40),('amount_received','Amount received','text',40),('payment_due_date','Payment due date','date',0),('payment_received_date','Payment received date','date',0),('payment_reference','Payment / bank reference','text',240)] %}<div class="field"><label for="dispatch-{{ key }}">{{ label }}</label><input id="dispatch-{{ key }}" name="{{ key }}" type="{{ kind }}" value="{{ order[key] or '' }}" {% if maximum %}maxlength="{{ maximum }}"{% endif %} {% if key in ('order_value','amount_received') %}inputmode="decimal"{% endif %} {% if key == 'payment_received_date' %}max="{{ today }}"{% endif %}></div>{% endfor %}
+<div class="field dispatch-wide"><label for="dispatch-payment-notes">Payment notes</label><textarea id="dispatch-payment-notes" name="payment_notes" maxlength="4000" rows="3">{{ order.payment_notes or '' }}</textarea></div>
+{% endif %}
+</div></fieldset>
+<p class="pipeline-footnote">These payment details are entered for this order. Imported accounting balances remain separate.</p>
+<div class="form-actions"><button class="btn primary" type="submit">Save shipment &amp; payment details</button><span class="pipeline-dispatch-updated">Last updated is recorded automatically.</span></div>
+</form></details>{% endif %}
+</div></section>

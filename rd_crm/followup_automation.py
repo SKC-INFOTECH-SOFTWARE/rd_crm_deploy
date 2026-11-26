@@ -6,7 +6,8 @@ import hashlib
 from sqlalchemy import select
 
 from rd_import.codec import dumps
-from . import db, followups, history
+from rd_formatting import indian_amount
+from . import db, followups, history, ledger_reconciliation
 
 
 PURPOSE_PREFIXES = {
@@ -48,11 +49,11 @@ def _fingerprint(kind: str, evidence: dict) -> str:
 
 
 def _money(value: Decimal) -> str:
-    return f'{value:,.2f}'
+    return indian_amount(value)
 
 
 def recommendations(engine, client_ids, as_of: date | None = None,
-                    positions: dict | None = None) -> dict[int, list[dict]]:
+                    positions: dict | None = None, ledger_result=None) -> dict[int, list[dict]]:
     """Suggest, but never create, payment and reorder tasks.
 
     Only strongly attributable, non-cancelled history from ``account_positions``
@@ -65,6 +66,8 @@ def recommendations(engine, client_ids, as_of: date | None = None,
         return {}
     if positions is None:
         positions = history.account_positions(engine, identifiers)
+    source_exceptions = ledger_reconciliation.client_exceptions(
+        ledger_result if ledger_result is not None else ledger_reconciliation.report(engine))
     with engine.connect() as connection:
         client_rows = {row['id']: dict(row) for row in connection.execute(select(
             db.clients.c.id, db.clients.c.name, db.clients.c.alias, db.clients.c.owner,
@@ -124,7 +127,8 @@ def recommendations(engine, client_ids, as_of: date | None = None,
         pending = [row for row in position.get('balances', [])
                    if row['pending'] >= (Decimal('100') if row['currency'] == 'INR'
                                          else Decimal('1'))]
-        if pending and 'payment' not in open_kinds[client_id]:
+        if (pending and not position.get('review_candidates') and client_id not in source_exceptions
+                and 'payment' not in open_kinds[client_id]):
             lags = []
             for receipt in receipt_dates:
                 prior_sales = [sale for sale in sale_dates if sale < receipt]

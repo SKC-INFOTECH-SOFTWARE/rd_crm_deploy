@@ -20,10 +20,20 @@
 </div>
 <section class="panel">
   <h2>Users</h2>
-  <div class="table-wrap"><table><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Access actions</th></tr></thead><tbody>
+  <p class="muted small">Production pipeline access requires approval for each named account, including administrators. Approval enables the access allowed by their role; Sales users still see only assigned clients. Changes apply on the next request.</p>
+  <div class="table-wrap"><table><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Production pipeline</th><th>Access actions</th></tr></thead><tbody>
   {% for user in users %}<tr>
     <td><strong>{{ user.display_name }}</strong><br><span class="muted">{{ user.username }}</span></td>
     <td>{{ user.role_names or 'None' }}</td><td>{{ 'Active' if user.active else 'Deactivated' }}</td>
+    <td>
+      <span class="pill {{ 'green' if user.pipeline_approved else '' }}">{{ 'Approved' if user.pipeline_approved else 'Not approved' }}</span>
+      <form method="post" action="{{ url_for('change_user', user_id=user.id) }}" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <input type="hidden" name="action" value="pipeline_access">
+        <input type="hidden" name="approved" value="{{ '0' if user.pipeline_approved else '1' }}">
+        <button type="submit">{{ 'Revoke approval' if user.pipeline_approved else 'Approve access' }}</button>
+      </form>
+    </td>
     <td>
       <form method="post" action="{{ url_for('change_user', user_id=user.id) }}" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{ csrf }}">

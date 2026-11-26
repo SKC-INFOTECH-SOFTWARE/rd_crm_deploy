@@ -5,6 +5,7 @@
   <p class="subhead">{% if client.alias %}{{ client.name }} · {% endif %}{{ client.city or client.location or 'Location unspecified' }}{% if client.state %}, {{ client.state }}{% endif %}{% if client.country %}, {{ client.country }}{% endif %} · <span class="pill {{ 'green' if status == 'customer' else 'blue' }}">{{ status|capitalize }}</span></p>
   <p class="subhead">Primary contact: {% if client.primary_contact %}{{ client.primary_contact.name }} · {{ client.primary_contact.phone or client.primary_contact.email or 'No contact details' }}{% else %}None recorded{% endif %} · Assigned sales: {{ assigned_sales_users|map(attribute='display_name')|join(', ') if assigned_sales_users else 'Unassigned' }}</p>
 </div><div class="head-actions">
+  {% if status != 'supplier' and can('pipeline.view') %}<a class="btn" href="{{ url_for('production_board', client_id=client.id) }}">Production orders</a>{% endif %}
   {% if can('clients.edit') %}
   <a class="btn" href="{{ url_for('client_detail', client_id=client.id, tab='activity', return_to=back_url) }}#log-interaction">Log interaction</a>
   <a class="btn" href="{{ url_for('client_detail', client_id=client.id, tab='activity', return_to=back_url) }}#add-followup">Add follow-up</a>

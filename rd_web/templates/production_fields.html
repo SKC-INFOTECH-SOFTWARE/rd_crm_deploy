@@ -1,0 +1,6 @@
+<div class="field"><label for="order-product">Product / work description *</label><input id="order-product" name="product" maxlength="240" required value="{{ values.get('product','') }}" placeholder="e.g. Woodworth LB"></div>
+<div class="field"><label for="order-quantity">Quantity *</label><input id="order-quantity" name="quantity" type="number" min="0.00000001" max="1000000000000000" step="any" required value="{{ values.get('quantity','') }}" placeholder="0"></div>
+<div class="field"><label for="order-unit">Unit *</label><input id="order-unit" name="unit" maxlength="30" required value="{{ values.get('unit','') }}" placeholder="kg, litres, units, plant…"></div>
+<div class="field"><label for="order-due">Dispatch due date *</label><input id="order-due" name="due_date" type="date" required value="{{ values.get('due_date','') }}"></div>
+<div class="field"><label for="order-owner">Person responsible</label><input id="order-owner" name="owner" maxlength="100" value="{{ values.get('owner','') }}" placeholder="Name or team"></div>
+<div class="field"><label for="order-notes">Production notes</label><textarea id="order-notes" name="notes" maxlength="4000" rows="3" placeholder="Specifications, packing or special instructions">{{ values.get('notes','') }}</textarea></div>

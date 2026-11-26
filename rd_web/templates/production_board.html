@@ -1,0 +1,56 @@
+{% extends 'base.html' %}{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='production.css') }}">
+<div class="page-head">
+  <div><div class="eyebrow">Order fulfilment</div><h1>Production pipeline</h1>
+    <p class="subhead">Follow each order through production, shipment, delivery and payment.</p></div>
+  {% if can('pipeline.manage') %}<div class="head-actions"><a class="btn primary" href="{{ url_for('new_production_order', client_id=filters.client_id) }}"><span aria-hidden="true">＋</span> New order</a></div>{% endif %}
+</div>
+{% if filters.view != 'closed' %}<div class="pipeline-metrics">
+{% if filters.view == 'dispatched' %}
+  <div class="pipeline-metric"><span class="pipeline-metric-icon" aria-hidden="true">&#9875;</span><div><span>Open shipping orders</span><strong>{{ board.metrics.shipping }}</strong></div></div>
+  <div class="pipeline-metric metric-late"><span class="pipeline-metric-icon" aria-hidden="true">&#9719;</span><div><span>Arrival overdue</span><strong>{{ board.metrics.arrival_overdue }}</strong></div></div>
+  <div class="pipeline-metric metric-hold"><span class="pipeline-metric-icon" aria-hidden="true">&#8377;</span><div><span>Payment pending</span><strong>{{ board.metrics.payment_pending }}</strong></div></div>
+  <div class="pipeline-metric metric-late"><span class="pipeline-metric-icon" aria-hidden="true">!</span><div><span>Payment overdue</span><strong>{{ board.metrics.payment_overdue }}</strong></div></div>
+{% else %}
+  <div class="pipeline-metric"><span class="pipeline-metric-icon" aria-hidden="true">▤</span><div><span>Pending orders</span><strong>{{ board.metrics.pending }}</strong></div></div>
+  <div class="pipeline-metric metric-late"><span class="pipeline-metric-icon" aria-hidden="true">◷</span><div><span>Overdue</span><strong>{{ board.metrics.overdue }}</strong></div></div>
+  <div class="pipeline-metric metric-hold"><span class="pipeline-metric-icon" aria-hidden="true">Ⅱ</span><div><span>On hold</span><strong>{{ board.metrics.on_hold }}</strong></div></div>
+  <div class="pipeline-metric metric-ready"><span class="pipeline-metric-icon" aria-hidden="true">✓</span><div><span>Ready to dispatch</span><strong>{{ board.metrics.ready }}</strong></div></div>
+{% endif %}
+</div>{% endif %}
+<nav class="pipeline-view-tabs" aria-label="Order lifecycle views">{% for key,label in [('pending','Production'),('dispatched','Shipping & payments'),('all','All active orders'),('closed','Completed orders')] %}<a class="{{ 'active' if filters.view == key }}" {% if filters.view == key %}aria-current="page"{% endif %} href="{{ url_for('production_board', view=key, client_id=filters.client_id, q=filters.query, owner=filters.owner) }}">{{ label }}</a>{% endfor %}</nav>
+<form class="pipeline-toolbar" method="get">
+  <div class="pipeline-search"><label class="sr-only" for="pipeline-query">Search orders</label><input id="pipeline-query" name="q" type="search" value="{{ filters.query }}" placeholder="Search client, product or order…"></div>
+  <label class="sr-only" for="pipeline-client">Client</label><select id="pipeline-client" name="client_id"><option value="">All clients</option>{% for client in client_options %}<option value="{{ client.id }}" {{ 'selected' if filters.client_id == client.id }}>{{ client.name }}</option>{% endfor %}</select>
+  <label class="sr-only" for="pipeline-owner">Person responsible</label><select id="pipeline-owner" name="owner"><option value="">All owners</option>{% for owner in board.owners %}<option {{ 'selected' if filters.owner == owner }}>{{ owner }}</option>{% endfor %}</select>
+  <input type="hidden" name="view" value="{{ filters.view }}">
+  <button class="btn" type="submit">Apply</button>{% if filters.query or filters.client_id or filters.owner or filters.view != 'pending' %}<a class="pipeline-reset" href="{{ url_for('production_board') }}">Clear</a>{% endif %}
+</form>
+{% if filters.view == 'closed' %}{% include 'production_completed.html' %}{% else %}
+<div class="pipeline-caption"><span><strong>{{ board.total }}</strong> {{ 'order' if board.total == 1 else 'orders' }} on this board</span><span>{% if can('pipeline.manage') %}Drag a card to move it, or use its stage menu.{% else %}Your team updates each order as work progresses.{% endif %}</span></div>
+{% if not board.has_orders %}<div class="pipeline-welcome"><span class="pipeline-welcome-icon" aria-hidden="true">▥</span><div><h2>Your next order starts here</h2><p>{% if filters.query or filters.client_id or filters.owner %}No orders match these filters.{% else %}Add a confirmed client order to follow it from preparation through dispatch.{% endif %}</p></div>{% if can('pipeline.manage') %}<a class="btn primary" href="{{ url_for('new_production_order', client_id=filters.client_id) }}">Add an order</a>{% endif %}</div>{% endif %}
+<div class="pipeline-board" aria-label="Orders by stage" tabindex="0" data-columns="{{ board.columns|length }}">
+  {% for column in board.columns %}<section class="pipeline-column stage-{{ column.key }}" data-stage="{{ column.key }}" aria-label="{{ column.label }}">
+    <header class="pipeline-column-head"><span class="pipeline-stage-dot" aria-hidden="true"></span><h2>{{ column.label }}</h2><span class="pipeline-count">{{ column.orders|length }}</span></header>
+    <div class="pipeline-lane">
+    {% for order in column.orders %}<article class="pipeline-order {{ 'is-overdue' if order.overdue }} {{ 'is-held' if order.hold_reason }}" data-order="{{ order.id }}" {% if can('pipeline.manage') and not order.hold_reason %}draggable="true"{% endif %}>
+      <div class="pipeline-order-top"><span>{{ order.label }}</span>{% if order.hold_reason %}<span class="pipeline-tag tag-hold">Ⅱ On hold</span>{% elif order.overdue %}<span class="pipeline-tag tag-late">{{ -order.days_until_due }}d overdue</span>{% elif order.due_today %}<span class="pipeline-tag tag-today">Due today</span>{% endif %}</div>
+      <h3><a href="{{ url_for('production_order', order_id=order.id) }}">{{ order.client_name }}</a></h3>
+      <p class="pipeline-product">{{ order.product }}</p>
+      <div class="pipeline-quantity">{{ order.quantity_display|indian_number }} <span>{{ order.unit }}</span></div>
+      {% if order.reference %}<p class="pipeline-reference">PO / reference: {{ order.reference }}</p>{% endif %}
+      <div class="pipeline-progress" role="progressbar" aria-valuenow="{{ order.progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ order.stage_label }}"><span data-progress="{{ order.progress }}"></span></div>
+      {% if order.post_dispatch %}{% include 'production_dispatch_card.html' %}{% endif %}
+      {% if order.hold_reason %}<p class="pipeline-hold-note">{{ order.hold_reason }}</p>{% endif %}
+      <div class="pipeline-order-foot"><span class="{{ 'danger-text' if order.overdue }}">◷ {% if order.post_dispatch %}{% if order.stage in ('dispatched','in_transit') and order.expected_arrival_date %}ETA {{ order.expected_arrival_date }}{% elif can('financial.view') and order.payment_status != 'complete' and order.payment_due_date %}Payment {{ order.payment_due_date }}{% elif order.delivered_date %}Delivered {{ order.delivered_date }}{% else %}Shipped {{ order.shipped_date or 'date not recorded' }}{% endif %}{% else %}{{ order.due_date }}{% endif %}</span><span>{{ order.owner or 'Unassigned' }}</span></div>
+      {% if can('pipeline.manage') and not order.hold_reason %}<form class="pipeline-stage-form" method="post" action="{{ url_for('change_production_order', order_id=order.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="version" value="{{ order.version }}"><input type="hidden" name="action" value="stage"><input type="hidden" name="return_to" value="{{ request.full_path.rstrip('?') }}"><label class="sr-only" for="stage-{{ order.id }}">Stage for {{ order.label }}</label><select id="stage-{{ order.id }}" name="stage">{% for key,label in stages %}<option value="{{ key }}" {{ 'selected' if order.stage == key }}>{{ 'Complete order' if key == 'closed' else label }}</option>{% endfor %}</select><button type="submit" aria-label="Move {{ order.label }}">Move</button></form>{% endif %}
+      {% if can('pipeline.manage') %}<div class="pipeline-card-actions"><a class="btn small" href="{{ url_for('edit_production_order', order_id=order.id) }}" aria-label="Edit {{ order.label }}">Edit order</a></div>{% endif %}
+      <p class="pipeline-card-updated">Updated <time datetime="{{ order.updated_at }}">{{ order.updated_at_display }}</time></p>
+    </article>{% else %}<div class="pipeline-lane-empty"><span aria-hidden="true">○</span><p>No orders here</p>{% if column.key == 'dispatched' and filters.view == 'pending' %}<a href="{{ url_for('production_board', view='dispatched', client_id=filters.client_id, q=filters.query, owner=filters.owner) }}">View dispatched orders &rarr;</a>{% endif %}</div>{% endfor %}
+    </div>
+  </section>{% endfor %}
+</div>
+<p class="pipeline-footnote">Stages and tracking details are updated by your team. Completed orders leave the active board and remain available under Completed orders.</p>
+<script src="{{ url_for('static', filename='production.js') }}" defer></script>
+{% endif %}
+{% endblock %}

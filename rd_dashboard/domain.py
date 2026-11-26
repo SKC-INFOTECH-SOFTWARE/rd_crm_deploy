@@ -3,6 +3,7 @@ from collections import defaultdict
 from decimal import Decimal, localcontext
 from typing import Any, Iterable
 from rd_import.codec import decimal, loads
+from rd_formatting import indian_number
 
 MISSING_CURRENCY = 'Unspecified'
 COUNTS = ('fetched', 'inserted', 'updated', 'unchanged', 'quarantined', 'failed')
@@ -37,7 +38,7 @@ def money(value: Decimal | None, currency: Any) -> str:
         number = decimal(value)
     except ValueError:
         return str(value) + ' [unparsed source value; ' + currency_label(currency) + ']'
-    return ('Not supplied' if number is None else format(number, 'f')) + ' [' + currency_label(currency) + ']'
+    return ('Not supplied' if number is None else indian_number(number)) + ' [' + currency_label(currency) + ']'
 
 
 def exact_sum(values: Iterable[Decimal]) -> Decimal:

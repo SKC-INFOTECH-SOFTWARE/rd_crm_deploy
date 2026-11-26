@@ -57,7 +57,10 @@ class Importer:
             status = 'partial_failure' if any(r['status'] != 'success' for r in results) else 'success'
             with self.engine.begin() as connection:
                 connection.execute(update(db.runs).where(db.runs.c.id == run_id).values(status=status, finished_at=timestamp()))
-            return {'run_id': run_id, 'status': status, 'endpoints': results}
+            from rd_crm import reconciliation
+            balance_review = reconciliation.after_import(self.engine, run_id)
+            return {'run_id': run_id, 'status': status, 'endpoints': results,
+                    'balance_review': balance_review}
 
     def import_endpoint(self, run_id, endpoint, incremental, company=None):
         company = company if company is not None else company_for(self.config, endpoint)

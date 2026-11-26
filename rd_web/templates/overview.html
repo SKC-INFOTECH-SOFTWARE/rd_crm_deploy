@@ -6,11 +6,14 @@
 <p class="subhead">A clear view of client actions{% if show_quotations %} and quotations needing a response{% endif %}.</p>
 </div>
 <div class="head-actions">
+{% if can('pipeline.view') %}<a class="btn" href="{{ url_for('production_board') }}">Production pipeline</a>{% endif %}
 <a class="btn" href="{{ url_for('client_list') }}#add-client">Add client</a>
 <a class="btn" href="{{ url_for('followup_list') }}#log-interaction">Log interaction</a>
 {% if can('quotations.edit') %}<a class="btn primary" href="{{ url_for('quote_list') }}#new-quote">New quotation</a>{% endif %}
 </div>
 </div>
+{% if balance_review %}<div class="notice {{ 'amber' if balance_review.summary.vouchers }} section-card"><div><strong>Automatic customer balance checks: {{ balance_review.summary.vouchers }} vouchers need review across {{ balance_review.summary.clients }} client profiles.</strong><br>{{ balance_review.summary.journals }} journal vouchers · {{ balance_review.summary.stale }} changed after approval. <a href="{{ url_for('data_review') }}#balance-review">Open central balance review</a>.</div></div>{% endif %}
+{% if balance_review %}<div class="notice small section-card">{% if balance_review.ledger_batch %}Source ledger comparison: {{ balance_review.ledger_summary.difference }} differences · {{ balance_review.ledger_summary.needs_review }} need review · {{ balance_review.ledger_summary.missing }} missing source balances.{% else %}Independent source closing balances: awaiting a Balance ledger summary export.{% endif %} <a href="{{ url_for('source_ledgers') }}">Source ledger reconciliation</a>.</div>{% endif %}
 <div class="metrics">
 <a class="metric metric-link highlight" href="{{ url_for('followup_list') }}#today">
 <div class="metric-top">Follow-ups today <span>◷</span>

@@ -36,10 +36,13 @@ Initial login: **admin / admin**. This is a temporary seed password; change it f
 **Users** right after the first login, then clear `RD_ADMIN_PASSWORD` in `.env`.
 Re-running the script is safe: existing `.env`, config, data and users are kept.
 
-Before go-live, set the real values (ask the client):
+The Balance API is preset to the production URL from the vendor's documentation,
+`https://rdindustrial.balanceerp.com/api` (`config.example.json`). The `/api` suffix is
+required because the importer appends only the endpoint name. Before go-live, set the
+real values (ask the client):
 
-- `runtime-config/import_config.json` → `base_url` of the production Balance API
-- `.env` → `RD_SUBSCRIPTION_KEY`, and `secrets/private_key.pem` if `decryption_mode` is `local`
+- `.env` → `RD_SUBSCRIPTION_KEY` (with `subscription_key_header` in `import_config.json`)
+  if the vendor enables a key, and `secrets/private_key.pem` if `decryption_mode` is `local`
 - `runtime-config/*.json` → reviewed client overrides, identity groups, ignored clients,
   profile enrichment and supplier directory (empty placeholders are valid)
 
@@ -90,6 +93,11 @@ docker compose run --rm migrate python -m rd_ops preflight --production
 docker compose run --rm backup python -m rd_ops backup        # manual backup
 docker compose run --rm migrate python -m rd_web.admin reset-password --username admin
 ```
+
+The **Production pipeline** (orders from confirmation through dispatch, delivery and
+payment, with a completed-orders list) is visible only to users approved under
+**Users → Production pipeline**, including administrators. **Data review → Ledgers**
+compares a Balance customer-ledger CSV against imported entries.
 
 Roles: Admin/Owner, Management, Sales, External Sales, Accounts, Operations, Read-only.
 There is no public sign-up and no self-service password reset; administrators create

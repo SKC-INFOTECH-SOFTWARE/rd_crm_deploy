@@ -88,10 +88,12 @@ def source_group_key(party=source_db.parties):
 
 
 def customer_voucher_scope(voucher=source_db.vouchers):
-    """Exclude inward supplier credit notes from customer activity."""
+    """Keep inward notes and explicitly reviewed supplier receipts out of receivables."""
+    from .supplier_receipts import confirmed as supplier_receipt_confirmed
     io_type = func.upper(func.trim(func.coalesce(
         source_text(voucher.c.payload_json, 'iotype'), '')))
-    return or_(voucher.c.endpoint != 'taxablecn', io_type == 'O')
+    return and_(or_(voucher.c.endpoint != 'taxablecn', io_type == 'O'),
+                ~supplier_receipt_confirmed(voucher=voucher))
 
 
 def confirmed_voucher(client_id, voucher=source_db.vouchers):

@@ -1,0 +1,40 @@
+<section id="balance-review" class="section-card">
+<div class="card-head"><div><h2>Customer balance checks</h2><p class="card-sub">Checked {{ balances.checked_at }} · {{ balances.summary.scanned }} imported vouchers examined across all customer profiles</p></div></div>
+<div class="metrics">
+  <div class="metric {{ 'highlight' if balances.summary.vouchers }}"><div class="metric-top">Vouchers needing review</div><div class="metric-value">{{ balances.summary.vouchers }}</div><div class="metric-foot">{{ balances.summary.unassigned }} have no confirmed client match</div></div>
+  <div class="metric"><div class="metric-top">Affected client profiles</div><div class="metric-value">{{ balances.summary.clients }}</div><div class="metric-foot">Balances marked provisional</div></div>
+  <div class="metric"><div class="metric-top">Journal vouchers</div><div class="metric-value">{{ balances.summary.journals }}</div><div class="metric-foot">Debtor lines included in these checks</div></div>
+  <div class="metric"><div class="metric-top">Changed after approval</div><div class="metric-value">{{ balances.summary.stale }}</div><div class="metric-foot">Current source needs another review</div></div>
+</div>
+<div class="notice small section-card">Checks run after every data pull. This page also checks the current data whenever opened. Unmatched entries remain flagged; they are never assigned by guessing. These checks cover imported customer activity. Source opening and closing balances are needed for full ledger reconciliation.</div>
+{% if not balances.latest_import or balances.latest_import.status != 'success' %}<div class="notice amber section-card"><strong>Latest data pull: {{ balances.latest_import.status|replace('_', ' ') if balances.latest_import else 'not available' }}.</strong> Coverage checks cannot establish completeness while source rows are missing, held back or still importing.{% if can('sync.run') %} <a href="{{ url_for('sync_status') }}">Check source import status</a>.{% endif %}</div>{% endif %}
+{% if last_balance_check and last_balance_check.status == 'failed' %}<div class="notice amber section-card">The check after the last import failed ({{ last_balance_check.error_code }}). The results above were recalculated from the current data.</div>{% endif %}
+<section class="card section-card">
+<form method="get" class="card-body"><div class="form-grid two">
+  <label class="field">Company, client, voucher or source name<input name="balance_q" value="{{ balances.query }}"></label>
+  <label class="field">Reason<select name="balance_reason"><option value="">All reasons</option>{% for key, label in balances.reasons.items() %}<option value="{{ key }}" {{ 'selected' if balances.reason == key }}>{{ label }}</option>{% endfor %}</select></label>
+</div><div class="form-actions"><button class="btn primary">Filter balance review</button><a class="btn" href="{{ url_for('data_review') }}#balance-review">Clear</a></div></form>
+<div class="card-head"><p class="card-sub">{{ balances.total }} matching accounting entries · page {{ balances.page }} of {{ balances.pages }}. Multiple debtor lines can belong to one journal.</p></div>
+{% if balances.rows %}<div class="table-wrap"><table class="detail-table"><thead><tr><th>Source entry</th><th>Account movement</th><th>Why review is needed</th><th>Possible profiles / confirmation</th></tr></thead><tbody>
+{% for row in balances.rows %}<tr>
+  <td><strong>{{ row.party or 'No source party supplied' }}</strong><div class="cell-sub">{{ row.company }} · {{ row.endpoint }} #{{ row.number or row.voucher_id }} · {{ row.date or 'Unknown date' }}</div>{% if row.ledger_id %}<div class="cell-sub">Journal debtor line {{ row.ledger_id }}</div>{% endif %}</td>
+  <td>{% for movement in row.movements %}<div>{{ movement.amount|indian_amount if movement.amount is not none else 'Missing amount' }} {{ movement.currency }} · {{ movement.movement|capitalize or 'Unknown movement' }}</div>{% endfor %}{% if row.assigned_client_id %}<div class="cell-sub">A client match exists; check the flagged source details.</div>{% else %}<span class="pill amber">Not included in a client balance</span>{% endif %}</td>
+  <td>{% for explanation in row.explanations %}<div class="cell-sub">{{ explanation }}</div>{% endfor %}</td>
+  <td>{% for client in row.clients %}<div><a href="{{ url_for('client_detail', client_id=client.id, tab='payments') }}#{{ 'supplier-receipts' if row.supplier_candidates else 'transaction-matching-review' }}">{{ client.name }} (#{{ client.id }})</a></div>{% else %}<span class="cell-sub">Confirm the source customer first.</span><div><a href="{{ url_for('party_search', q=row.party) }}">Find source party</a></div>{% endfor %}
+    {% if row.supplier_candidates %}
+    <div class="notice small">Incoming supplier receipt. Including it adds the amount received to the supplier account and reduces any supplier advance.</div>
+    <div class="cell-sub">{{ row.receipt_preview.address }}{% for mode in row.receipt_preview.modes %}<div>{{ mode }}</div>{% endfor %}{% for reference in row.receipt_preview.references %}<div>Source reference: {{ reference }}</div>{% endfor %}</div>
+    {% if can('data_review.manage') and can('financial.view') %}
+    {% for supplier in row.supplier_candidates %}
+    <form method="post" action="{{ url_for('confirm_supplier_receipt', client_id=supplier.id, voucher_id=row.voucher_id) }}" class="review-actions">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="source_hash" value="{{ row.receipt_preview.source_hash }}">
+      <input type="hidden" name="balance_q" value="{{ balances.query }}">
+      <label class="field">Review basis<input name="basis" required maxlength="1000" value="Incoming receipt confirmed for supplier account"></label>
+      <button class="btn primary small" type="submit">Include supplier receipt{% if row.supplier_candidates|length > 1 %}: {{ supplier.name }}{% endif %}</button>
+    </form>
+    {% endfor %}{% endif %}{% endif %}
+  </td>
+</tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-card">No customer balance exceptions match these filters.</div>{% endif %}
+<div class="card-foot head-actions">{% if balances.page > 1 %}<a class="btn small" href="{{ url_for('data_review', balance_page=balances.page-1, balance_q=balances.query, balance_reason=balances.reason) }}#balance-review">Previous</a>{% endif %}{% if balances.page < balances.pages %}<a class="btn small" href="{{ url_for('data_review', balance_page=balances.page+1, balance_q=balances.query, balance_reason=balances.reason) }}#balance-review">Next</a>{% endif %}</div>
+</section></section>

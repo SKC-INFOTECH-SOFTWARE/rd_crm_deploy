@@ -1,0 +1,16 @@
+{% extends 'base.html' %}{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='production.css') }}">
+<div class="page-head"><div><div class="eyebrow"><a href="{{ url_for('production_board') }}">Production pipeline</a> / {{ order.label if editing else 'New order' }}</div><h1>{{ 'Edit production order' if editing else 'Add a production order' }}</h1><p class="subhead">{{ 'Update the client, order details and dispatch due date.' if editing else 'Confirm the client, what needs making, and when it should leave.' }}</p></div>{% if editing %}<div class="head-actions"><a class="btn" href="{{ url_for('production_order', order_id=order.id) }}">Back to order</a></div>{% endif %}</div>
+{% if error %}<div class="notice amber" role="alert">{{ error }}</div>{% endif %}
+<section class="card pipeline-entry"><div class="card-head"><div><h2>Order details</h2><p class="card-sub">{{ order.client_name if editing else 'New orders start at Order confirmed.' }}</p></div><span class="pipeline-tag">{{ order.stage_label if editing else '01 / 06' }}</span></div>
+{% if client_options %}<form class="card-body" method="post" action="{{ url_for('change_production_order', order_id=order.id) if editing else url_for('create_production_order') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+{% if editing %}<input type="hidden" name="version" value="{{ values.get('version', order.version) }}"><input type="hidden" name="action" value="edit">{% endif %}
+<div class="form-grid">
+<div class="field"><label for="order-client">Client *</label><select id="order-client" name="client_id" required><option value="">Choose a client</option>{% for client in client_options %}<option value="{{ client.id }}" {{ 'selected' if values.get('client_id')|string == client.id|string }}>{{ client.name }}</option>{% endfor %}</select></div>
+<div class="field"><label for="order-reference">Customer PO / reference</label><input id="order-reference" name="reference" maxlength="120" value="{{ values.get('reference','') }}" placeholder="e.g. PO-2026-042"></div>
+{% include 'production_fields.html' %}
+</div><div class="form-actions"><button class="btn primary" type="submit">{{ 'Save changes' if editing else 'Create order' }}</button><a class="btn" href="{{ url_for('production_order', order_id=order.id) if editing else url_for('production_board') }}">Cancel</a>{% if editing and error %}<a class="btn" href="{{ url_for('edit_production_order', order_id=order.id) }}">Reload current details</a>{% endif %}</div></form>
+{% else %}<div class="card-body"><p>Add a client before creating a production order.</p><a class="btn" href="{{ url_for('client_list') }}">Go to clients</a></div>{% endif %}
+</section>
+{% endblock %}

@@ -69,7 +69,9 @@ def build_quote_workbook(quote: dict, version: dict, snapshot: dict,
     input_blue = '#0000FF'
     linked_green = '#008000'
     currency = snapshot.get('quote_currency') or 'INR'
-    money_code = '₹ #,##0.00' if currency == 'INR' else 'US$ #,##0.00'
+    # Ask Excel to apply its Indian locale for INR so large totals use lakh/crore
+    # grouping (for example, 12,34,567.89). USD retains its conventional format.
+    money_code = '[$₹-en-IN] #,##0.00' if currency == 'INR' else 'US$ #,##0.00'
 
     title = workbook.add_format({'bold': True, 'font_size': 20, 'font_color': 'white',
                                  'bg_color': dark, 'align': 'center', 'valign': 'vcenter'})

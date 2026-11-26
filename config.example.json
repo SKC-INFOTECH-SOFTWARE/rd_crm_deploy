@@ -1,5 +1,5 @@
 {
-  "base_url": "https://balance-vendor.example/api",
+  "base_url": "https://rdindustrial.balanceerp.com/api",
   "master_company": "RDIC",
   "transaction_company": "RD",
   "endpoint_companies": {},

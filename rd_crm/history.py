@@ -42,24 +42,34 @@ def _party_token(party, payload) -> tuple:
     return 'record', str(party['company']), party_id
 
 
-def account_positions(engine, client_ids) -> dict:
+def account_positions(engine, client_ids, *, audit=None, start='', end='',
+                      company='', include_configured=True) -> dict:
     """Calculated customer positions from strongly attributable imported activity.
 
     Positive net values are pending payments; negative values are customer credits.
     Currencies are never combined. Opening balances are unavailable in the source.
     """
+    if start:
+        date.fromisoformat(start)
+    if end:
+        date.fromisoformat(end)
+    if start and end and start > end:
+        raise CRMError('Period start must not be after period end.')
     identifiers = sorted({int(value) for value in client_ids if value is not None})
     positions = {identifier: dict(net=defaultdict(lambda: Decimal(0)),
         matched=set(), components=defaultdict(lambda: defaultdict(lambda: Decimal(0))),
-        review_candidates=set(), latest_sale=None, sale_dates=set(), receipt_dates=set())
+        review_candidates=set(), review_journals=set(), latest_sale=None,
+        sale_dates=set(), receipt_dates=set())
         for identifier in identifiers}
-    if not identifiers:
+    if not identifiers and audit is None:
         return {}
-    configured_names = identity_groups.configured_name_keys(identifiers)
+    configured_names = identity_groups.configured_name_keys()
 
     with engine.connect() as connection:
         all_parties = []
         name_groups = defaultdict(set)
+        tax_groups = defaultdict(set)
+        tax_name_groups = defaultdict(set)
         for raw in connection.execute(select(source_db.parties)).mappings():
             party = dict(raw)
             payload = loads(party['payload_json'])
@@ -69,13 +79,16 @@ def account_positions(engine, client_ids) -> dict:
                 continue
             token = _party_token(party, payload)
             name_groups[(party['company'], _normalized_name(party['name']))].add(token)
+            tax = _tax_id(payload.get('TaxRegistrationNumber') or payload.get('PAN'))
+            if tax:
+                tax_groups[(party['company'], tax)].add(token)
+                tax_name_groups[(party['company'], tax, _normalized_name(party['name']))].add(token)
             all_parties.append((party, payload, token))
 
         linked_rows = connection.execute(select(db.party_links.c.client_id,
             source_db.parties).join(source_db.parties, and_(
                 db.party_links.c.company == source_db.parties.c.company,
-                db.party_links.c.party_id == source_db.parties.c.party_id)).where(
-                    db.party_links.c.client_id.in_(identifiers))).mappings()
+                db.party_links.c.party_id == source_db.parties.c.party_id))).mappings()
         party_clients = defaultdict(set)
         tax_clients = defaultdict(set)
         tax_name_clients = defaultdict(set)
@@ -84,6 +97,8 @@ def account_positions(engine, client_ids) -> dict:
             row = dict(raw)
             client_id = row.pop('client_id')
             payload = loads(row['payload_json'])
+            if str(payload.get('PartyType') or '').strip().upper() != 'CUSTOMER':
+                continue
             party_clients[(row['company'], str(row['party_id']))].add(client_id)
             tax = _tax_id(payload.get('TaxRegistrationNumber') or payload.get('PAN'))
             if tax:
@@ -95,16 +110,17 @@ def account_positions(engine, client_ids) -> dict:
         safe_names = {key: next(iter(value)) for key, value in name_clients.items()
             if len(value) == 1 and len(name_groups.get(key, ())) == 1}
         safe_taxes = {key: next(iter(value)) for key, value in tax_clients.items()
-            if len(value) == 1}
+            if len(value) == 1 and len(tax_groups.get(key, ())) == 1}
         safe_tax_names = {key: next(iter(value)) for key, value in tax_name_clients.items()
-            if len(value) == 1}
+            if len(value) == 1 and len(tax_name_groups.get(key, ())) == 1}
         safe_parties = {key: next(iter(value)) for key, value in party_clients.items()
             if len(value) == 1}
-        manual = {row['voucher_id']: row['client_id'] for row in connection.execute(
-            select(db.voucher_links.c.voucher_id, db.voucher_links.c.client_id)
+        reviewed = {row['voucher_id']: dict(row) for row in connection.execute(
+            select(db.voucher_links, source_db.vouchers.c.source_hash.label('current_hash'))
             .join(source_db.vouchers, source_db.vouchers.c.id == db.voucher_links.c.voucher_id)
-            .where(db.voucher_links.c.client_id.in_(identifiers),
-                   db.voucher_links.c.source_hash == source_db.vouchers.c.source_hash)).mappings()}
+            ).mappings()}
+        manual = {key: row['client_id'] for key, row in reviewed.items()
+                  if row['source_hash'] == row['current_hash']}
         defaults = {(row['company'], row['endpoint']): row['currency'] for row in
             connection.execute(select(db.currency_defaults)).mappings()}
         payments = defaultdict(list)
@@ -137,6 +153,100 @@ def account_positions(engine, client_ids) -> dict:
                 return safe_names.get((row['company'], _normalized_name(row['party_source'])))
             return None
 
+        def observe(row, payload, assigned, ledger=None):
+            """Expose omissions using the same attribution as the balance itself.
+
+            Candidate identities are evidence for review, never extra matches.
+            Count vouchers once per client even when a journal has several lines.
+            """
+            voucher_id = row.get('voucher_id', row.get('id'))
+            key = ('journal' if ledger is not None else 'voucher', voucher_id)
+            if audit is not None:
+                audit.setdefault('scanned', set()).add(key)
+            if row['cancellation'] == 'cancelled':
+                return
+            if assigned is not None and assigned not in positions and audit is None:
+                return
+            name = ledger['name'] if ledger is not None else row['party_source']
+            details = (loads(ledger['ledger_payload']).get('LEDGERDETAILS') or {}
+                       if ledger is not None else {})
+            tax = _tax_id(details.get('GSTIN') if ledger is not None else
+                payload.get('Gstin') or (payload.get('Buyer') or {}).get('Gstin'))
+            candidates = set(name_clients.get((row['company'], _normalized_name(name)), ()))
+            if tax:
+                candidates.update(tax_clients.get((row['company'], tax), ()))
+            if payload.get('PartyId'):
+                candidates.update(party_clients.get((row['company'], str(payload['PartyId'])), ()))
+            prior = reviewed.get(voucher_id)
+            stale = bool(prior and prior['source_hash'] != prior['current_hash'])
+            if stale and prior['client_id'] in positions:
+                candidates.add(prior['client_id'])
+            if assigned in positions:
+                candidates.add(assigned)
+            if assigned is not None and not stale:
+                # A current confirmed match belongs to its owner, even if an
+                # unrelated profile has the same display name.
+                candidates = {assigned}
+            rule_row = dict(id=voucher_id, company=row['company'], endpoint=row['endpoint'],
+                            number=row['number'], date=row['date'])
+            if assigned is not None and client_overrides.is_voucher_excluded(assigned, rule_row):
+                return
+            original_candidates = bool(candidates)
+            candidates = {value for value in candidates
+                if not client_overrides.is_voucher_excluded(value, rule_row)}
+            if original_candidates and not candidates:
+                return
+            if assigned is not None:
+                rule_row = client_overrides.apply_voucher(assigned, rule_row)
+            reasons = []
+            if stale:
+                reasons.append('source_changed')
+            if row['cancellation'] == 'uncertain':
+                reasons.append('uncertain_cancellation')
+            if (start or end) and not row.get('display_date'):
+                reasons.append('invalid_date')
+            if assigned is None:
+                reasons.append('ambiguous_client' if len(candidates) > 1 or len(
+                    name_groups.get((row['company'], _normalized_name(name)), ())) > 1 else
+                               'unconfirmed_match' if candidates else 'missing_client')
+            if payload.get('PartyId') and candidates and not party_clients.get((
+                    row['company'], str(payload['PartyId']))):
+                reasons.append('conflicting_source_id')
+            if ledger is not None:
+                movement = str(ledger['movement'] or '').strip().casefold()
+                if movement not in ('debit', 'credit'):
+                    reasons.append('invalid_movement')
+                movements = [dict(amount=ledger['amount'], movement=movement,
+                    currency=currency(row['company'], row['endpoint'], payload, voucher=rule_row))]
+            elif row['endpoint'] == 'receivevoucher' and payments.get(voucher_id):
+                movements = [dict(amount=payment['amount'], movement='credit',
+                    currency=currency(row['company'], row['endpoint'], payload, payment['currency'], rule_row))
+                    for payment in payments[voucher_id]]
+            else:
+                movements = [dict(amount=rule_row.get('amount', row['amount']),
+                    movement='debit' if row['endpoint'] == 'sale' else 'credit',
+                    currency=currency(row['company'], row['endpoint'], payload, voucher=rule_row))]
+            if any(item['amount'] is None for item in movements):
+                reasons.append('missing_amount')
+            if any(item['currency'] == 'UNKNOWN' for item in movements):
+                reasons.append('unknown_currency')
+            if not reasons:
+                if audit is not None:
+                    audit.setdefault('matched', set()).add(key)
+                return
+            for candidate in candidates & positions.keys():
+                positions[candidate]['review_candidates'].add(voucher_id)
+                if ledger is not None:
+                    positions[candidate]['review_journals'].add(voucher_id)
+            if audit is not None:
+                audit.setdefault('rows', []).append(dict(voucher_id=voucher_id,
+                    ledger_id=ledger['ledger_id'] if ledger is not None else None,
+                    company=row['company'], endpoint=row['endpoint'], number=row['number'],
+                    date=row.get('display_date') or row['date'], party=name,
+                    source_hash=row.get('source_hash') or (prior or {}).get('current_hash'),
+                    client_ids=sorted(candidates), assigned_client_id=assigned,
+                    reasons=reasons, movements=movements))
+
         def apply(client_id, code, amount, component, record):
             if client_id not in positions or amount is None:
                 return
@@ -149,22 +259,25 @@ def account_positions(engine, client_ids) -> dict:
             voucher_date().label('display_date')).where(
                 source_db.vouchers.c.endpoint.in_(CUSTOMER_ENDPOINTS),
                 directory.customer_voucher_scope())
+        def period_scope(statement):
+            if company:
+                statement = statement.where(source_db.vouchers.c.company == company)
+            if start:
+                statement = statement.where(or_(voucher_date() >= start, voucher_date().is_(None)))
+            if end:
+                statement = statement.where(or_(voucher_date() <= end, voucher_date().is_(None)))
+            return statement
+        voucher_query = period_scope(voucher_query)
         for raw in connection.execute(voucher_query).mappings():
             row = dict(raw)
-            if row['cancellation'] in ('cancelled', 'uncertain'):
-                continue
             payload = loads(row['payload_json'])
             client_id = client_for_voucher(row, payload)
-            if client_id is None:
-                party_id = payload.get('PartyId')
-                tax = _tax_id(payload.get('Gstin') or
-                              (payload.get('Buyer') or {}).get('Gstin'))
-                if row['endpoint'] != 'receivevoucher' and not party_id and not tax:
-                    candidate = safe_names.get((row['company'],
-                        _normalized_name(row['party_source'])))
-                    if (candidate in positions and
-                            not client_overrides.is_voucher_excluded(candidate, row)):
-                        positions[candidate]['review_candidates'].add(row['id'])
+            observe(row, payload, client_id)
+            if row['cancellation'] in ('cancelled', 'uncertain'):
+                continue
+            if (start or end) and not row['display_date']:
+                continue
+            if client_id not in positions:
                 continue
             if client_overrides.is_voucher_excluded(client_id, row):
                 continue
@@ -193,6 +306,8 @@ def account_positions(engine, client_ids) -> dict:
         journal_query = select(source_db.vouchers.c.id.label('voucher_id'),
             source_db.vouchers.c.company, source_db.vouchers.c.endpoint,
             source_db.vouchers.c.number, source_db.vouchers.c.date,
+            source_db.vouchers.c.source_hash,
+            voucher_date().label('display_date'),
             source_db.vouchers.c.payload_json.label('voucher_payload'),
             source_db.ledgers.c.id.label('ledger_id'), source_db.ledgers.c.name,
             source_db.ledgers.c.movement, source_db.ledgers.c.amount,
@@ -200,9 +315,8 @@ def account_positions(engine, client_ids) -> dict:
             cancellation().label('cancellation')).join(source_db.ledgers,
                 source_db.ledgers.c.voucher_id == source_db.vouchers.c.id).where(
                     source_db.vouchers.c.endpoint == 'journalvoucher')
+        journal_query = period_scope(journal_query)
         for row in connection.execute(journal_query).mappings():
-            if row['cancellation'] in ('cancelled', 'uncertain'):
-                continue
             ledger_payload = loads(row['ledger_payload'])
             ledger_details = ledger_payload.get('LEDGERDETAILS') or {}
             ledger_group = str(ledger_details.get('GROUP') or '').strip().casefold()
@@ -222,7 +336,13 @@ def account_positions(engine, client_ids) -> dict:
                 else:
                     client_id = safe_names.get((row['company'], _normalized_name(row['name'])))
             movement = str(row['movement'] or '').strip().lower()
-            if client_id is None or movement not in ('debit', 'credit'):
+            voucher_payload = loads(row['voucher_payload'])
+            observe(dict(row), voucher_payload, client_id, row)
+            if row['cancellation'] in ('cancelled', 'uncertain'):
+                continue
+            if (start or end) and not row['display_date']:
+                continue
+            if client_id not in positions or movement not in ('debit', 'credit'):
                 continue
             voucher_rule_row = dict(id=row['voucher_id'], company=row['company'],
                                     endpoint=row['endpoint'], number=row['number'],
@@ -239,8 +359,11 @@ def account_positions(engine, client_ids) -> dict:
                   ('journal', row['voucher_id']))
 
     for client_id, raw in positions.items():
-        for adjustment in client_overrides.position_adjustments(
-                client_id, 'customer'):
+        for adjustment in (client_overrides.position_adjustments(
+                client_id, 'customer') if include_configured else []):
+            if ((start and adjustment['effective_date'] < start) or
+                    (end and adjustment['effective_date'] > end)):
+                continue
             code = adjustment['currency']
             value = adjustment['amount']
             raw['net'][code] += value
@@ -260,6 +383,7 @@ def account_positions(engine, client_ids) -> dict:
             receipt_dates=sorted(raw['receipt_dates']),
             review_candidates=len(raw['review_candidates']),
             matched_records=len(raw['matched']), configured_adjustments=configured,
+            review_journals=len(raw['review_journals']),
             components={name: dict(amounts)
                 for name, amounts in raw['components'].items()})
     return result
@@ -579,6 +703,8 @@ def review_queue(engine, client_id: int):
     with engine.connect() as connection:
         parties = source_parties(engine, client_id)
         candidates = {}
+        matched_journals = _journal_statement(connection, client_id).with_only_columns(
+            source_db.vouchers.c.id).subquery()
         for party in parties:
             query = select(source_db.vouchers, voucher_date().label('display_date')).where(
                 source_db.vouchers.c.company == party['company'],
@@ -594,6 +720,25 @@ def review_queue(engine, client_id: int):
                 voucher_date().desc()).limit(50)
             for row in connection.execute(query).mappings():
                 candidates[row['id']] = dict(row)
+            # Journal headers often have no Party/PartyId. Review the debtor
+            # ledger instead, including duplicate-name profiles such as exports.
+            journal_query = select(source_db.vouchers,
+                voucher_date().label('display_date')).join(source_db.ledgers,
+                    source_db.ledgers.c.voucher_id == source_db.vouchers.c.id).where(
+                source_db.vouchers.c.company == party['company'],
+                source_db.vouchers.c.endpoint == 'journalvoucher',
+                source_db.vouchers.c.id.not_in(select(matched_journals.c.id)),
+                func.lower(func.trim(source_text(source_db.ledgers.c.payload_json,
+                    'LEDGERDETAILS.GROUP'))).in_(('sundry debtor', 'sundry debtors')),
+                directory.normalized_party_name(source_db.ledgers.c.name) ==
+                    _normalized_name(party['name']),
+                ~client_overrides.voucher_is_excluded(client_id),
+                ~exists(select(db.voucher_links.c.voucher_id).where(
+                    db.voucher_links.c.voucher_id == source_db.vouchers.c.id)),
+                cancellation().not_in(('cancelled', 'uncertain'))).order_by(
+                    voucher_date().desc()).limit(50)
+            for row in connection.execute(journal_query).mappings():
+                candidates[row['id']] = dict(row, party_source=party['name'])
         stale = [dict(row) for row in connection.execute(select(db.voucher_links,
             source_db.vouchers.c.number, source_db.vouchers.c.source_hash.label('current_hash'))
             .join(source_db.vouchers, db.voucher_links.c.voucher_id == source_db.vouchers.c.id)

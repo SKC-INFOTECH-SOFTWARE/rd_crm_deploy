@@ -1,0 +1,11 @@
+<section class="card section-card">
+  <div class="card-head"><div><h2>Completed orders</h2><p class="card-sub">{{ board.total }} {{ 'order' if board.total == 1 else 'orders' }} retained with delivery details and change history.</p></div></div>
+  {% if board.completed_orders %}<div class="table-wrap"><table class="detail-table">
+    <thead><tr><th>Order / client</th><th>Product / quantity</th><th>Delivered</th><th>Payment</th><th>Last updated</th></tr></thead>
+    <tbody>{% for order in board.completed_orders %}<tr data-completed-order="{{ order.id }}">
+      <td><a href="{{ url_for('production_order', order_id=order.id) }}">{{ order.label }}</a><div class="cell-sub">{{ order.client_name }}</div>{% if order.reference %}<div class="cell-sub">PO / reference {{ order.reference }}</div>{% endif %}</td>
+      <td>{{ order.product }}<div class="cell-sub">{{ order.quantity_display|indian_number }} {{ order.unit }}</div></td>
+      <td>{{ order.delivered_date }}</td><td>{{ order.payment_status_label }}</td><td>{{ order.updated_at_display }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>{% else %}<div class="empty-card">No completed orders match these filters.</div>{% endif %}
+</section>

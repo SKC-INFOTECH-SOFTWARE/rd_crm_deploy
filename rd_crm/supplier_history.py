@@ -8,7 +8,7 @@ from sqlalchemy import and_, exists, func, literal, or_, select
 from rd_dashboard.expressions import cancellation, source_text, voucher_date
 from rd_import import db as source_db
 from rd_import.codec import loads
-from . import client_overrides, db, directory, history
+from . import client_overrides, db, directory, history, supplier_receipts
 from .clients import CRMError
 
 
@@ -16,7 +16,8 @@ PAGE_SIZE = 25
 PURCHASE_ENDPOINTS = ('pbill', 'miscpbill')
 ADJUSTMENT_ENDPOINTS = ('preturn', 'taxablecn', 'taxabledn')
 PAYMENT_ENDPOINTS = ('paymentvoucher',)
-SUPPLIER_ENDPOINTS = PURCHASE_ENDPOINTS + ADJUSTMENT_ENDPOINTS + PAYMENT_ENDPOINTS
+RECEIPT_ENDPOINTS = ('receivevoucher',)
+SUPPLIER_ENDPOINTS = PURCHASE_ENDPOINTS + ADJUSTMENT_ENDPOINTS + PAYMENT_ENDPOINTS + RECEIPT_ENDPOINTS
 
 
 def _money(value):
@@ -100,7 +101,10 @@ def _base(connection, client_id: int, endpoints):
     statement = select(source_db.vouchers, voucher_date().label('display_date'),
         cancellation().label('cancellation')).where(
             source_db.vouchers.c.endpoint.in_(endpoints),
-            confirmed_supplier_voucher(client_id, identities=identities))
+            or_(and_(source_db.vouchers.c.endpoint != 'receivevoucher',
+                     confirmed_supplier_voucher(client_id, identities=identities)),
+                and_(source_db.vouchers.c.endpoint == 'receivevoucher',
+                     supplier_receipts.confirmed(client_id))))
     if set(endpoints) & {'taxablecn', 'taxabledn'}:
         io_type = func.upper(func.trim(func.coalesce(
             source_text(source_db.vouchers.c.payload_json, 'iotype'), '')))
@@ -223,6 +227,11 @@ def account_positions(engine, client_ids) -> dict:
                    db.voucher_links.c.source_hash == source_db.vouchers.c.source_hash)).mappings()}
         defaults = {(row['company'], row['endpoint']): row['currency'] for row in
                     connection.execute(select(db.currency_defaults)).mappings()}
+        confirmed_receipts = {row['voucher_id']: row['client_id'] for row in connection.execute(
+            select(db.supplier_receipt_links.c.voucher_id, db.supplier_receipt_links.c.client_id)
+            .join(source_db.vouchers, source_db.vouchers.c.id == db.supplier_receipt_links.c.voucher_id)
+            .where(db.supplier_receipt_links.c.client_id.in_(identifiers),
+                   db.supplier_receipt_links.c.source_hash == source_db.vouchers.c.source_hash)).mappings()}
         payment_rows = defaultdict(list)
         for row in connection.execute(select(source_db.payments)).mappings():
             payment_rows[row['voucher_id']].append(dict(row))
@@ -265,7 +274,8 @@ def account_positions(engine, client_ids) -> dict:
             if row['endpoint'] in ('taxablecn', 'taxabledn') and str(
                     payload.get('iotype') or '').strip().upper() != 'I':
                 continue
-            client_id = client_for(row, payload)
+            client_id = (confirmed_receipts.get(row['id']) if row['endpoint'] == 'receivevoucher'
+                         else client_for(row, payload))
             if client_id is None or client_overrides.is_voucher_excluded(client_id, row):
                 continue
             row = client_overrides.apply_voucher(client_id, row)
@@ -283,6 +293,12 @@ def account_positions(engine, client_ids) -> dict:
                 code = currency(row['company'], row['endpoint'], payload, voucher=row)
                 apply(client_id, code, -_money(row['amount']), 'purchase_adjustments',
                       ('voucher', row['id']))
+            elif row['endpoint'] == 'receivevoucher':
+                details = payment_rows.get(row['id']) or [dict(amount=row['amount'], currency=None)]
+                for payment in details:
+                    code = currency(row['company'], row['endpoint'], payload, payment['currency'], row)
+                    apply(client_id, code, _money(payment['amount']), 'supplier_receipts',
+                          ('voucher', row['id']))
             elif payment_rows.get(row['id']):
                 for payment in payment_rows[row['id']]:
                     code = currency(row['company'], row['endpoint'], payload,
@@ -361,6 +377,7 @@ def account_positions(engine, client_ids) -> dict:
 def summary(engine, client_id: int, start='', end='') -> dict:
     purchases = defaultdict(lambda: Decimal(0))
     payments = defaultdict(lambda: Decimal(0))
+    receipts = defaultdict(lambda: Decimal(0))
     adjustments = defaultdict(lambda: Decimal(0))
     products = {}
     latest_purchase = latest_payment = None
@@ -397,6 +414,16 @@ def summary(engine, client_id: int, start='', end='') -> dict:
                         item['latest_rate'] = line['rate']
             elif row['endpoint'] in ADJUSTMENT_ENDPOINTS:
                 adjustments[code] += _money(row['amount'])
+            elif row['endpoint'] == 'receivevoucher':
+                details = connection.execute(select(source_db.payments.c.amount,
+                    source_db.payments.c.currency).where(
+                        source_db.payments.c.voucher_id == row['id'])).mappings().all()
+                if details:
+                    for payment in details:
+                        if payment['amount'] is not None:
+                            receipts[payment['currency'] or code] += _money(payment['amount'])
+                elif row['amount'] is not None:
+                    receipts[code] += _money(row['amount'])
             else:
                 details = connection.execute(select(source_db.payments.c.amount,
                     source_db.payments.c.currency).where(
@@ -410,7 +437,7 @@ def summary(engine, client_id: int, start='', end='') -> dict:
                 if row['display_date'] and (not latest_payment or
                                              row['display_date'] > latest_payment):
                     latest_payment = row['display_date']
-    return dict(purchases=dict(purchases), payments=dict(payments),
+    return dict(purchases=dict(purchases), payments=dict(payments), receipts=dict(receipts),
                 adjustments=dict(adjustments), products=sorted(products.values(),
                     key=lambda item: (item['name'], item['unit'], item['currency'])),
                 latest_purchase=latest_purchase, latest_payment=latest_payment)

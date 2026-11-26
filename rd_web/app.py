@@ -16,6 +16,7 @@ from rd_import import db as source_db
 from rd_import import review as import_review
 from rd_import import control as sync_control
 from rd_import.codec import decimal as exact_decimal, loads
+from rd_formatting import indian_amount, indian_number, indian_signed_amount
 from rd_dashboard import catalog
 from rd_dashboard.domain import explain_issue
 from rd_dashboard.store import ReadStore
@@ -26,7 +27,8 @@ from rd_stock.rules import StockError
 from rd_ops.release import metadata as release_metadata
 from rd_crm import (assignments, clients, costing, currency, db, directory,
                     followups, history, followup_automation, ignored_clients,
-                    payment_due, quotations, supplier_catalog, supplier_history)
+                    payment_due, quotations, supplier_catalog, supplier_history, production,
+                    reconciliation, ledger_reconciliation, supplier_receipts)
 from . import auth, quote_excel
 
 
@@ -39,9 +41,9 @@ def create_app(engine=None, auth_enabled=None, secret_key=None) -> Flask:
     if auth_enabled and not configured_secret:
         raise RuntimeError('RD_SECRET_KEY is required when authentication is enabled.')
     app.secret_key = configured_secret or secrets.token_hex(32)
-    production = os.environ.get('RD_ENV', '').casefold() == 'production'
+    production_environment = os.environ.get('RD_ENV', '').casefold() == 'production'
     # Secure cookies need HTTPS; RD_COOKIE_SECURE=false allows direct http://host:port access.
-    cookie_secure = production and os.environ.get(
+    cookie_secure = production_environment and os.environ.get(
         'RD_COOKIE_SECURE', 'true').strip().casefold() not in ('0', 'false', 'no')
     app.config.update(SESSION_COOKIE_NAME='rdic_session',
                       SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax',
@@ -49,6 +51,9 @@ def create_app(engine=None, auth_enabled=None, secret_key=None) -> Flask:
                       PERMANENT_SESSION_LIFETIME=timedelta(hours=8))
     app.extensions['crm_engine'] = engine or db.local_engine()
     auth.init_app(app, auth_enabled)
+    app.jinja_env.filters['indian_amount'] = indian_amount
+    app.jinja_env.filters['indian_number'] = indian_number
+    app.jinja_env.filters['indian_signed_amount'] = indian_signed_amount
 
     @app.context_processor
     def release_context():
@@ -246,7 +251,108 @@ def create_app(engine=None, auth_enabled=None, secret_key=None) -> Flask:
                 row['client_name'] = 'Restricted client'
         return shell('Overview', 'overview.html', groups=groups, opportunities=opportunities,
                      open_opportunities=opportunity_count, waiting=waiting,
-                     show_quotations=show_quotations)
+                     show_quotations=show_quotations,
+                     balance_review=(reconciliation.report(database())
+                         if permitted('data_review.manage') else None))
+
+    def production_clients():
+        return clients.list_clients(database(), profile_role='customer', limit=None,
+                                    allowed_client_ids=scoped_client_ids())
+
+    @app.get('/production')
+    def production_board():
+        client_id = request.args.get('client_id', type=int)
+        filters = dict(query=request.args.get('q', '')[:100], client_id=client_id,
+                       owner=request.args.get('owner', '')[:100],
+                       view=request.args.get('view', 'pending'))
+        board = production.board(database(), today(), **filters,
+                                 allowed_client_ids=scoped_client_ids())
+        return shell('Production pipeline', 'production_board.html', board=board,
+                     filters=filters, client_options=production_clients(),
+                     stages=production.STAGES)
+
+    @app.get('/production/new')
+    def new_production_order():
+        return shell('Production pipeline', 'production_form.html',
+                     client_options=production_clients(),
+                     values={'client_id': request.args.get('client_id', type=int)}, error=None)
+
+    @app.post('/production/orders')
+    def create_production_order():
+        try:
+            client_id = request.form.get('client_id', type=int)
+            if client_id is None:
+                raise clients.CRMError('Choose a client for this order.')
+            require_client_access(client_id)
+            if not any(client['id'] == client_id for client in production_clients()):
+                raise clients.CRMError('Choose an available customer or prospect.')
+            order_id = production.create(database(), client_id, request.form,
+                                         getattr(g, 'current_user', {}).get('id'))
+        except clients.CRMError as error:
+            return (shell('Production pipeline', 'production_form.html',
+                client_options=production_clients(), values=request.form,
+                error=str(error)), 422)
+        flash('Order added to the production pipeline.', 'success')
+        return redirect(url_for('production_order', order_id=order_id), code=303)
+
+    @app.get('/production/orders/<int:order_id>')
+    def production_order(order_id):
+        result = production.detail(database(), order_id, today(), scoped_client_ids())
+        if result is None:
+            abort(404)
+        return shell('Production pipeline', 'production_order.html', **result,
+                     stages=production.STAGES, payment_statuses=production.PAYMENT_STATUSES,
+                     phase_stages=(production.POST_DISPATCH_STAGES if result['order']['post_dispatch']
+                                   else production.STAGES[:6]))
+
+    @app.post('/production/orders/<int:order_id>/change')
+    def change_production_order(order_id):
+        existing = production.detail(database(), order_id, today(), scoped_client_ids())
+        if existing is None:
+            abort(404)
+        version = request.form.get('version', type=int)
+        if version is None:
+            abort(400, 'Reload this order before saving.')
+        target = request.form.get('return_to', '')
+        parsed = urlsplit(target)
+        if parsed.netloc or parsed.scheme or parsed.path != '/production':
+            target = url_for('production_order', order_id=order_id)
+        try:
+            fields = request.form
+            if request.form.get('action') == 'edit' and 'client_id' in request.form:
+                client_id = request.form.get('client_id', type=int)
+                if client_id is None:
+                    raise clients.CRMError('Choose a client for this order.')
+                require_client_access(client_id)
+                if not any(client['id'] == client_id for client in production_clients()):
+                    raise clients.CRMError('Choose an available customer or prospect.')
+            if request.form.get('action') == 'dispatch' and not permitted('financial.view'):
+                protected = production.PAYMENT_FIELDS - {'payment_status'}
+                if protected.intersection(request.form):
+                    abort(403)
+                fields = request.form.to_dict()
+                fields.update({key: existing['order'][key] or '' for key in protected})
+            production.change(database(), order_id, version,
+                request.form.get('action'), fields,
+                getattr(g, 'current_user', {}).get('id'))
+        except clients.CRMError as error:
+            if request.form.get('action') == 'edit':
+                return (shell('Edit production order', 'production_form.html',
+                    editing=True, order=existing['order'], values=request.form,
+                    client_options=production_clients(), error=str(error)), 422)
+            flash(str(error), 'error')
+            return redirect(target, code=303)
+        flash('Production order updated.', 'success')
+        return redirect(target, code=303)
+
+    @app.get('/production/orders/<int:order_id>/edit')
+    def edit_production_order(order_id):
+        result = production.detail(database(), order_id, today(), scoped_client_ids())
+        if result is None:
+            abort(404)
+        return shell('Edit production order', 'production_form.html', editing=True,
+                     order=result['order'], values=result['order'], error=None,
+                     client_options=production_clients())
 
     @app.get('/clients')
     def client_list():
@@ -490,6 +596,10 @@ def create_app(engine=None, auth_enabled=None, secret_key=None) -> Flask:
         supplier_journals = supplier_history.journal_adjustments(database(), client_id,
             start, end, int(request.args.get('supplier_journals_page', '1'))) if (
                 tab == 'payments' and status == 'supplier') else None
+        supplier_incoming = supplier_history.transactions(database(), client_id,
+            supplier_history.RECEIPT_ENDPOINTS, start, end, '', cancelled,
+            int(request.args.get('supplier_receipts_page', '1'))) if (
+                tab == 'payments' and status == 'supplier') else None
         full_totals = history.summary(database(), client_id, start, end, today()) if status != 'supplier' else None
         full_position = history.account_positions(database(), [client_id])[client_id] if status != 'supplier' else None
         supplier_totals = (supplier_history.summary(database(), client_id, start, end)
@@ -506,8 +616,9 @@ def create_app(engine=None, auth_enabled=None, secret_key=None) -> Flask:
                             review_candidates=0, latest_sale=full_position['latest_sale'])
         else:
             totals, position = full_totals, full_position
+        ledger_result = ledger_reconciliation.report(database()) if status != 'supplier' else None
         suggestions = followup_automation.recommendations(database(), [client_id], today(),
-            {client_id: full_position})[client_id] if status != 'supplier' else []
+            {client_id: full_position}, ledger_result=ledger_result)[client_id] if status != 'supplier' else []
         if not show_financials:
             suggestions = [item for item in suggestions if item['kind'] != 'payment']
         review = history.review_queue(database(), client_id) if show_financials and status != 'supplier' and tab in (
@@ -521,10 +632,14 @@ def create_app(engine=None, auth_enabled=None, secret_key=None) -> Flask:
         return shell('Suppliers' if status == 'supplier' else 'Clients', 'client_detail.html',
                      client=client, totals=totals, position=position,
                      suggestions=suggestions,
+                     source_ledger_rows=([row for row in ledger_result['rows'] if row['client_id'] == client_id]
+                         if ledger_result and show_financials else []),
+                     source_ledger_batch=ledger_result['batch'] if ledger_result and show_financials else None,
                      sales=sales, returns=returns, receipts=receipts, adjustments=adjustments, review=review,
                      supplier_bills=supplier_bills,
                      supplier_adjustments=supplier_adjustments,
                      supplier_payments=supplier_payments,
+                     supplier_incoming=supplier_incoming,
                      supplier_journals=supplier_journals,
                      supplier_totals=supplier_totals,
                      supplier_position=supplier_position,
@@ -985,9 +1100,82 @@ def create_app(engine=None, auth_enabled=None, secret_key=None) -> Flask:
     @app.get('/data-review')
     def data_review():
         return shell('Data review', 'data_review.html',
+                     balances=reconciliation.report(database(),
+                         query=request.args.get('balance_q', '')[:200],
+                         reason=request.args.get('balance_reason', ''),
+                         page=request.args.get('balance_page', 1, type=int)),
+                     last_balance_check=reconciliation.last_check(database()),
                      review=import_review.pending(database()),
                      decisions=import_review.decisions(database()),
                      explain_issue=explain_issue)
+
+    @app.post('/clients/<int:client_id>/supplier-receipts/<int:voucher_id>/confirm')
+    def confirm_supplier_receipt(client_id, voucher_id):
+        if not permitted('financial.view'):
+            abort(403)
+        try:
+            included = supplier_receipts.confirm(database(), client_id, voucher_id,
+                request.form.get('source_hash', ''), request.form.get('basis', ''),
+                actor_user_id=g.current_user['id'])
+            flash('Supplier receipt included in payment history and account balance.' if included
+                  else 'This supplier receipt is already included.', 'success')
+        except clients.CRMError as error:
+            flash(str(error), 'error')
+        return redirect(url_for('data_review', balance_q=request.form.get('balance_q', '')[:200],
+                                _anchor='balance-review'), code=303)
+
+    @app.get('/data-review/ledgers')
+    def source_ledgers():
+        result = ledger_reconciliation.report(database(), request.args.get('batch_id', type=int))
+        query = request.args.get('q', '')[:200].strip()
+        status_filter = request.args.get('status', '')
+        if status_filter and status_filter not in result['summary']:
+            raise clients.CRMError('Choose a valid ledger comparison status.')
+        rows = [row for row in result['rows'] if
+            (not status_filter or row['status'] == status_filter) and
+            (not query or query.casefold() in ' '.join((row['name'], row['company'],
+                                                       *row['party_ids'])).casefold())]
+        page = request.args.get('page', 1, type=int)
+        if page < 1:
+            raise clients.CRMError('Choose a valid ledger results page.')
+        pages = max(1, (len(rows) + 49) // 50)
+        page = min(page, pages)
+        current = today()
+        year = current.year if current.month >= 4 else current.year - 1
+        return shell('Data review', 'source_ledgers.html', ledger=result,
+            rows=rows[(page-1)*50:page*50], row_count=len(rows), page_number=page, pages=pages,
+            query=query, status_filter=status_filter, default_start=f'{year}-04-01',
+            default_end=current.isoformat())
+
+    @app.get('/data-review/ledgers/template.csv')
+    def source_ledger_template():
+        return send_file(BytesIO((','.join(ledger_reconciliation.HEADERS) + '\r\n').encode('utf-8-sig')),
+            mimetype='text/csv', as_attachment=True, download_name='customer-ledger-template.csv')
+
+    @app.post('/data-review/ledgers/import')
+    def import_source_ledger():
+        uploaded = request.files.get('ledger_file')
+        if not uploaded or not uploaded.filename.lower().endswith('.csv'):
+            raise clients.CRMError('Choose a Balance ledger summary saved as CSV UTF-8.')
+        identifier = ledger_reconciliation.stage(database(),
+            uploaded.read(ledger_reconciliation.MAX_BYTES + 1), uploaded.filename,
+            request.form.get('period_start', ''), request.form.get('period_end', ''),
+            request.form.get('source_reference', ''), g.current_user['id'])
+        return redirect(url_for('source_ledgers', batch_id=identifier), code=303)
+
+    @app.post('/data-review/ledgers/<int:batch_id>/confirm')
+    def confirm_source_ledger(batch_id):
+        ledger_reconciliation.confirm(database(), batch_id, g.current_user['id'])
+        flash('Source ledger report confirmed. Comparisons will run again after each data pull.', 'success')
+        return redirect(url_for('source_ledgers', batch_id=batch_id), code=303)
+
+    @app.get('/data-review/ledgers/<int:batch_id>/results.csv')
+    def source_ledger_export(batch_id):
+        if not permitted('financial.export'):
+            abort(403)
+        result = ledger_reconciliation.report(database(), batch_id)
+        return send_file(BytesIO(ledger_reconciliation.csv_results(result)), mimetype='text/csv',
+            as_attachment=True, download_name=f'ledger-comparison-{batch_id}.csv')
 
     @app.post('/data-review/<int:source_id>')
     def decide_quarantine(source_id):

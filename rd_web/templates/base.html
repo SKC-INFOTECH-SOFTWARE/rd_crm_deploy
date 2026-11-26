@@ -22,6 +22,7 @@
         {% for label, endpoint, symbol, permission in [('Overview','overview','O','dashboard.view'),('Clients','client_list','C','clients.view'),('Suppliers','supplier_list','S','clients.view'),('Follow-ups','followup_list','F','followups.manage'),('Quotations','quote_list','Q','quotations.view'),('Products & Costing','products','P','costs.view'),('Stock balances','stock_balances','St','stock.view')] %}
           {% if can(permission) and not (endpoint == 'supplier_list' and ('Sales' in current_user.roles or 'External Sales' in current_user.roles)) %}<a class="nav-btn {{ 'active' if page == label else '' }}" href="{{ client_directory_url if endpoint == 'client_list' else url_for(endpoint) }}" {% if page == label %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">{{ symbol }}</span><span>{{ label }}</span></a>{% endif %}
         {% endfor %}
+        {% if can('pipeline.view') %}<a class="nav-btn {{ 'active' if page == 'Production pipeline' else '' }}" href="{{ url_for('production_board') }}" {% if page == 'Production pipeline' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">Pr</span><span>Production pipeline</span></a>{% endif %}
         {% if can('data_review.manage') %}<a class="nav-btn {{ 'active' if page == 'Data review' else '' }}" href="{{ url_for('data_review') }}" {% if page == 'Data review' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">!</span><span>Data review</span></a>{% endif %}
       </nav>
       {% if can('sync.run') or can('users.manage') %}

@@ -1,0 +1,15 @@
+<div class="pipeline-dispatch-card">
+  <span class="pipeline-tag {{ 'payment-complete' if order.payment_status == 'complete' else 'tag-hold' if order.payment_status in ('pending','partial') }}">{{ '✓ ' if order.payment_status == 'complete' }}{{ order.payment_status_label }}</span>
+  <dl>
+    <div><dt>Ship / carrier</dt><dd>{{ order.ship_name or 'Not recorded' }}</dd></div>
+    <div><dt>Shipped</dt><dd>{{ order.shipped_date or 'Not recorded' }}</dd></div>
+    <div><dt>Expected arrival</dt><dd>{{ order.expected_arrival_date or 'Not recorded' }}</dd></div>
+    {% if order.current_location %}<div><dt>Location</dt><dd>{{ order.current_location }}</dd></div>{% endif %}
+    {% if order.delivered_date %}<div><dt>Delivered</dt><dd>{{ order.delivered_date }}</dd></div>{% endif %}
+    {% if can('financial.view') and order.amount_due is not none %}<div><dt>Payment due</dt><dd>{{ order.amount_due|indian_amount }} {{ order.payment_currency }}</dd></div>{% endif %}
+    {% if can('financial.view') and order.payment_due_date %}<div><dt>Pay by</dt><dd>{{ order.payment_due_date }}</dd></div>{% endif %}
+  </dl>
+  {% if order.arrival_overdue %}<p><span class="pipeline-tag tag-late">Arrival overdue</span></p>{% endif %}{% if order.payment_overdue %}<p><span class="pipeline-tag tag-late">Payment overdue</span></p>{% endif %}
+  {% if order.tracking_url %}<a href="{{ order.tracking_url }}" target="_blank" rel="noopener noreferrer">Carrier tracking &nearr;</a> &middot; {% endif %}
+  <a href="{{ url_for('production_order', order_id=order.id) }}#dispatch">{{ 'Edit shipment & payment' if can('pipeline.manage') else 'View shipment & payment' }} &rarr;</a>
+</div>

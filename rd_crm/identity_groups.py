@@ -169,7 +169,8 @@ def apply_groups(connection, config: dict) -> dict:
     plans = [_validate_group(connection, group) for group in config['groups']]
     stamp = datetime.now(timezone.utc).isoformat()
     results = []
-    child_tables = (db.contacts, db.opportunities, db.activities, db.followups, db.quotes)
+    child_tables = (db.contacts, db.opportunities, db.activities, db.followups, db.quotes,
+                    db.production_orders)
 
     for group, plan in zip(config['groups'], plans):
         canonical = plan['canonical']
