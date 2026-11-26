@@ -17,6 +17,7 @@
       <a class="brand" href="{{ url_for('overview') }}">
         <span class="brand-mark">RD</span><span><span class="brand-name">RDIC</span><span class="brand-caption">Operations workspace</span></span>
       </a>
+      <div class="sidebar-scroll">
       <div class="nav-label">Workspace</div>
       <nav>
         {% for label, endpoint, symbol, permission in [('Overview','overview','O','dashboard.view'),('Clients','client_list','C','clients.view'),('Suppliers','supplier_list','S','clients.view'),('Follow-ups','followup_list','F','followups.manage'),('Quotations','quote_list','Q','quotations.view'),('Products & Costing','products','P','costs.view'),('Stock balances','stock_balances','St','stock.view')] %}
@@ -32,10 +33,11 @@
         {% if can('users.manage') %}<a class="nav-btn {{ 'active' if page == 'Users' else '' }}" href="{{ url_for('user_admin') }}"><span class="nav-icon" aria-hidden="true">U</span><span>Users</span></a>{% endif %}
       </nav>
       {% endif %}
+      </div>
       <div class="sidebar-bottom">
         <div class="workspace-note">Woodworth · R D Industrial Corporation<br>Persistent CRM workspace</div>
-        <div class="user"><span class="avatar self">RD</span><span><span>{{ current_user.display_name if current_user else 'Signed out' }}</span><span class="user-role">{{ current_user.roles|join(', ') if current_user else '' }}</span></span></div>
-        {% if auth_enabled %}<form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="button" type="submit">Sign out</button></form>{% endif %}
+        <div class="user"><span class="avatar self">{{ (current_user.display_name.split()|map('first')|join|upper)[:2] if current_user and current_user.display_name else 'RD' }}</span><span class="user-text"><span class="user-name">{{ current_user.display_name if current_user else 'Signed out' }}</span><span class="user-role">{{ current_user.roles|join(', ') if current_user else '' }}</span></span></div>
+        {% if auth_enabled %}<form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="sidebar-signout" type="submit"><span aria-hidden="true">&#x21A9;</span> Sign out</button></form>{% endif %}
       </div>
     </aside>
     <div class="main-shell">

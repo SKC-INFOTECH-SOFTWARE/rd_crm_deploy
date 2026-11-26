@@ -70,7 +70,7 @@ class Importer:
             checkpoint = connection.execute(select(db.checkpoints).where(scope)).mappings().first()
         since = date.fromisoformat(checkpoint['successful_date']) - timedelta(days=self.overlap_days) if checkpoint and incremental else None
         payload = {'compshrtname': company, 'fetchall': 'N' if since else 'Y', 'lastsyncdt': api_date(since or start_date)}
-        counts = dict(fetched=0, inserted=0, updated=0, unchanged=0, quarantined=0, failed=0)
+        counts = dict(fetched=0, inserted=0, updated=0, unchanged=0, quarantined=0, dismissed=0, failed=0)
         with self.engine.begin() as connection:
             connection.execute(insert(db.attempts).values(id=attempt_id, run_id=run_id, company=company,
                 endpoint=endpoint, started_at=timestamp(), request_json=dumps(payload), status='running'))
@@ -92,6 +92,13 @@ class Importer:
             prepared = prepare(endpoint, rows, company, self.config)
             observed_keys = {item['identity'] for item in prepared if not item.get('quarantine')}
             stage = 'database'
+            # Rows an operator dismissed in Data review stay excluded, so they no longer
+            # hold back this endpoint's status and checkpoint on every later pull.
+            with self.engine.connect() as connection:
+                dismissed = set(connection.execute(select(db.quarantine_decisions.c.source_hash).where(
+                    db.quarantine_decisions.c.company == company,
+                    db.quarantine_decisions.c.endpoint == endpoint,
+                    db.quarantine_decisions.c.decision == 'dismissed')).scalars())
             # Audit is a separate durable transaction, retained on current-data rollback.
             with self.engine.begin() as connection:
                 for item in prepared:
@@ -101,6 +108,8 @@ class Importer:
             with self.engine.begin() as connection:
                 for item in prepared:
                     disposition = self.apply(connection, run_id, endpoint, company, item, observed_keys)
+                    if disposition == 'quarantined' and item['hash'] in dismissed:
+                        disposition = 'dismissed'
                     counts[disposition] += 1
                     connection.execute(update(db.sources).where(db.sources.c.id == item['source_id']).values(
                         disposition=disposition, issues_json=dumps(item['issues'])))
@@ -119,7 +128,7 @@ class Importer:
             return dict(endpoint=endpoint, company=company, status=status, **counts)
         except Exception as error:
             # Endpoint transaction has rolled back; no inserted/updated counts survive.
-            counts.update(inserted=0, updated=0, unchanged=0, quarantined=0, failed=counts['fetched'])
+            counts.update(inserted=0, updated=0, unchanged=0, quarantined=0, dismissed=0, failed=counts['fetched'])
             code = error_code(error)
             if stage != 'fetch':
                 code = stage + '_' + code

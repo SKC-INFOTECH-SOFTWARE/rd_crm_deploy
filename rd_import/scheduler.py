@@ -115,7 +115,7 @@ class Scheduler:
             if row.get('status') == 'fetching':
                 return
             counts = {name: row.get(name, 0) for name in (
-                'fetched', 'inserted', 'updated', 'unchanged', 'quarantined', 'failed')}
+                'fetched', 'inserted', 'updated', 'unchanged', 'quarantined', 'dismissed', 'failed')}
             self.log.info('endpoint_finished', extra={
                 'endpoint': row.get('endpoint'), 'company': row.get('company'),
                 'status': row.get('status'), 'counts': counts,

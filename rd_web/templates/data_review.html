@@ -14,7 +14,7 @@
 <div class="metric"><div class="metric-top">Can be approved</div><div class="metric-value">{{ review.approvable }}</div><div class="metric-foot">Voucher-number conflicts</div></div>
 <div class="metric"><div class="metric-top">Structurally blocked</div><div class="metric-value">{{ review.blocked }}</div><div class="metric-foot">Missing or invalid identifiers</div></div>
 </div>
-<div class="notice amber section-card"><div><strong>Approval means “accept as a separate record.”</strong><br>The existing same-number voucher is retained. Approve only after confirming that both records are genuine. Rows missing a required identifier cannot be approved, but may be dismissed from this queue.</div></div>
+<div class="notice amber section-card"><div><strong>Approval means “accept as a separate record.”</strong><br>The existing same-number voucher is retained. Approve only after confirming that both records are genuine. Rows missing a required identifier cannot be approved, but may be dismissed. A dismissed row stays excluded on later pulls, so it no longer marks the sync as a partial failure.</div></div>
 <section class="card section-card">
 <div class="card-head"><div><h2>Rows awaiting a decision</h2><p class="card-sub">Newest occurrence of each unique source payload</p></div></div>
 {% if review.rows %}<div class="table-wrap"><table>
