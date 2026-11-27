@@ -341,6 +341,7 @@ ROUTE_PERMISSIONS = {
     'set_recipe_active': 'recipes.manage',
     'data_review': 'data_review.manage', 'decide_quarantine': 'data_review.manage',
     'confirm_supplier_receipt': 'data_review.manage',
+    'bulk_confirm_vouchers': 'data_review.manage',
     'source_ledgers': 'data_review.manage', 'source_ledger_template': 'data_review.manage',
     'import_source_ledger': 'data_review.manage', 'confirm_source_ledger': 'data_review.manage',
     'source_ledger_export': 'data_review.manage',

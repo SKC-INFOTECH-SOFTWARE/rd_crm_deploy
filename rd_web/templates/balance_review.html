@@ -5,6 +5,7 @@
   <div class="metric"><div class="metric-top">Affected client profiles</div><div class="metric-value">{{ balances.summary.clients }}</div><div class="metric-foot">Balances marked provisional</div></div>
   <div class="metric"><div class="metric-top">Journal vouchers</div><div class="metric-value">{{ balances.summary.journals }}</div><div class="metric-foot">Debtor lines included in these checks</div></div>
   <div class="metric"><div class="metric-top">Changed after approval</div><div class="metric-value">{{ balances.summary.stale }}</div><div class="metric-foot">Current source needs another review</div></div>
+  <div class="metric"><div class="metric-top">Ready for bulk approval</div><div class="metric-value">{{ balances.summary.bulk_ready }}</div><div class="metric-foot">Only a client match is pending</div></div>
 </div>
 <div class="notice small section-card">Checks run after every data pull. This page also checks the current data whenever opened. Unmatched entries remain flagged; they are never assigned by guessing. These checks cover imported customer activity. Source opening and closing balances are needed for full ledger reconciliation.</div>
 {% if not balances.latest_import or balances.latest_import.status != 'success' %}<div class="notice amber section-card"><strong>Latest data pull: {{ balances.latest_import.status|replace('_', ' ') if balances.latest_import else 'not available' }}.</strong> Coverage checks cannot establish completeness while source rows are missing, held back or still importing.{% if can('sync.run') %} <a href="{{ url_for('sync_status') }}">Check source import status</a>.{% endif %}</div>{% endif %}
@@ -13,14 +14,39 @@
 <form method="get" class="card-body"><div class="form-grid two">
   <label class="field">Company, client, voucher or source name<input name="balance_q" value="{{ balances.query }}"></label>
   <label class="field">Reason<select name="balance_reason"><option value="">All reasons</option>{% for key, label in balances.reasons.items() %}<option value="{{ key }}" {{ 'selected' if balances.reason == key }}>{{ label }}</option>{% endfor %}</select></label>
+  <label class="field">Rows per page<select name="balance_size">{% for size in (50, 100, 200) %}<option value="{{ size }}" {{ 'selected' if balances.page_size == size }}>{{ size }}</option>{% endfor %}</select></label>
+  <label class="field bulk-filter"><span><input type="checkbox" name="balance_bulk" value="1" {{ 'checked' if balances.bulk_only }}> Only rows ready for bulk approval</span></label>
 </div><div class="form-actions"><button class="btn primary">Filter balance review</button><a class="btn" href="{{ url_for('data_review') }}#balance-review">Clear</a></div></form>
 <div class="card-head"><p class="card-sub">{{ balances.total }} matching accounting entries · page {{ balances.page }} of {{ balances.pages }}. Multiple debtor lines can belong to one journal.</p></div>
+{% set bulk_allowed = can('data_review.manage') and can('financial.view') %}
+{% set bulk_rows = balances.rows|selectattr('bulk.eligible')|list %}
+{% if bulk_allowed and bulk_rows %}
+<form id="bulk-voucher-confirm" class="card-body bulk-approve" method="post" action="{{ url_for('bulk_confirm_vouchers') }}" data-bulk-form>
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="balance_q" value="{{ balances.query }}">
+  <input type="hidden" name="balance_reason" value="{{ balances.reason }}">
+  <input type="hidden" name="balance_size" value="{{ balances.page_size }}">
+  <input type="hidden" name="balance_bulk" value="{{ '1' if balances.bulk_only else '' }}">
+  <div class="bulk-approve-head"><h3>Bulk approval</h3><span class="pill" data-bulk-count>0 selected</span></div>
+  <p class="cell-sub">{{ bulk_rows|length }} entr{{ 'ies' if bulk_rows|length != 1 else 'y' }} on this page need only a client match. Tick each voucher, check the client profile chosen in its row, then approve them together. Choosing a profile in one row also fills the other rows of the same source party on this page that have no choice yet. Each voucher is still checked against the profile's source party, PartyId and GSTIN, and must be unchanged since this page opened. Any that fail stay in review with the reason shown.</p>
+  <div class="form-grid two">
+    <label class="field">Review basis<input name="basis" required maxlength="900" value="Source party, voucher number and amount checked"></label>
+    <label class="field bulk-filter"><span><input type="checkbox" data-bulk-all> Select every row on this page with a chosen profile</span></label>
+  </div>
+  <div class="form-actions"><button class="btn primary" type="submit" data-confirm="Confirm the selected vouchers for the chosen client profiles? They will be included in those client balances.">Approve selected</button></div>
+</form>
+{% endif %}
 {% if balances.rows %}<div class="table-wrap"><table class="detail-table"><thead><tr><th>Source entry</th><th>Account movement</th><th>Why review is needed</th><th>Possible profiles / confirmation</th></tr></thead><tbody>
 {% for row in balances.rows %}<tr>
   <td><strong>{{ row.party or 'No source party supplied' }}</strong><div class="cell-sub">{{ row.company }} · {{ row.endpoint }} #{{ row.number or row.voucher_id }} · {{ row.date or 'Unknown date' }}</div>{% if row.ledger_id %}<div class="cell-sub">Journal debtor line {{ row.ledger_id }}</div>{% endif %}</td>
   <td>{% for movement in row.movements %}<div>{{ movement.amount|indian_amount if movement.amount is not none else 'Missing amount' }} {{ movement.currency }} · {{ movement.movement|capitalize or 'Unknown movement' }}</div>{% endfor %}{% if row.assigned_client_id %}<div class="cell-sub">A client match exists; check the flagged source details.</div>{% else %}<span class="pill amber">Not included in a client balance</span>{% endif %}</td>
   <td>{% for explanation in row.explanations %}<div class="cell-sub">{{ explanation }}</div>{% endfor %}</td>
-  <td>{% for client in row.clients %}<div><a href="{{ url_for('client_detail', client_id=client.id, tab='payments') }}#{{ 'supplier-receipts' if row.supplier_candidates else 'transaction-matching-review' }}">{{ client.name }} (#{{ client.id }})</a></div>{% else %}<span class="cell-sub">Confirm the source customer first.</span><div><a href="{{ url_for('party_search', q=row.party) }}">Find source party</a></div>{% endfor %}
+  <td>{% if bulk_allowed and row.bulk.eligible %}<div class="bulk-map">
+      <label class="bulk-pick"><input type="checkbox" form="bulk-voucher-confirm" name="voucher" value="{{ row.voucher_id }}" data-bulk-row> Approve to</label>
+      <select form="bulk-voucher-confirm" name="client_{{ row.voucher_id }}" data-bulk-client data-bulk-party="{{ row.company }}|{{ (row.party or '')|lower|trim }}" aria-label="Client profile for {{ row.endpoint }} {{ row.number or row.voucher_id }}">{% if not row.bulk.default_client_id %}<option value="">Choose profile…</option>{% endif %}{% for client in row.clients %}<option value="{{ client.id }}" {{ 'selected' if client.id == row.bulk.default_client_id }}>#{{ client.id }} · {{ client.name }}</option>{% endfor %}</select>
+      <input type="hidden" form="bulk-voucher-confirm" name="hash_{{ row.voucher_id }}" value="{{ row.source_hash or '' }}">
+    </div>{% elif bulk_allowed and row.bulk.note %}<div class="cell-sub bulk-note">Bulk approval unavailable. {{ row.bulk.note }}</div>{% endif %}
+    {% for client in row.clients %}<div><a href="{{ url_for('client_detail', client_id=client.id, tab='payments') }}#{{ 'supplier-receipts' if row.supplier_candidates else 'transaction-matching-review' }}">{{ client.name }} (#{{ client.id }})</a></div>{% else %}<span class="cell-sub">Confirm the source customer first.</span><div><a href="{{ url_for('party_search', q=row.party) }}">Find source party</a></div>{% endfor %}
     {% if row.supplier_candidates %}
     <div class="notice small">Incoming supplier receipt. Including it adds the amount received to the supplier account and reduces any supplier advance.</div>
     <div class="cell-sub">{{ row.receipt_preview.address }}{% for mode in row.receipt_preview.modes %}<div>{{ mode }}</div>{% endfor %}{% for reference in row.receipt_preview.references %}<div>Source reference: {{ reference }}</div>{% endfor %}</div>
@@ -36,5 +62,6 @@
     {% endfor %}{% endif %}{% endif %}
   </td>
 </tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-card">No customer balance exceptions match these filters.</div>{% endif %}
-<div class="card-foot head-actions">{% if balances.page > 1 %}<a class="btn small" href="{{ url_for('data_review', balance_page=balances.page-1, balance_q=balances.query, balance_reason=balances.reason) }}#balance-review">Previous</a>{% endif %}{% if balances.page < balances.pages %}<a class="btn small" href="{{ url_for('data_review', balance_page=balances.page+1, balance_q=balances.query, balance_reason=balances.reason) }}#balance-review">Next</a>{% endif %}</div>
+{% set paging = dict(balance_q=balances.query, balance_reason=balances.reason, balance_size=balances.page_size, balance_bulk='1' if balances.bulk_only else '') %}
+<div class="card-foot head-actions">{% if balances.page > 1 %}<a class="btn small" href="{{ url_for('data_review', balance_page=balances.page-1, **paging) }}#balance-review">Previous</a>{% endif %}{% if balances.page < balances.pages %}<a class="btn small" href="{{ url_for('data_review', balance_page=balances.page+1, **paging) }}#balance-review">Next</a>{% endif %}</div>
 </section></section>

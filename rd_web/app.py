@@ -1103,11 +1103,58 @@ def create_app(engine=None, auth_enabled=None, secret_key=None) -> Flask:
                      balances=reconciliation.report(database(),
                          query=request.args.get('balance_q', '')[:200],
                          reason=request.args.get('balance_reason', ''),
-                         page=request.args.get('balance_page', 1, type=int)),
+                         page=request.args.get('balance_page', 1, type=int),
+                         page_size=balance_page_size(),
+                         bulk_only=request.args.get('balance_bulk') == '1'),
                      last_balance_check=reconciliation.last_check(database()),
                      review=import_review.pending(database()),
                      decisions=import_review.decisions(database()),
                      explain_issue=explain_issue)
+
+    def balance_page_size():
+        size = request.args.get('balance_size', 50, type=int)
+        return size if size in (50, 100, 200) else 50
+
+    @app.post('/data-review/vouchers/bulk-confirm')
+    def bulk_confirm_vouchers():
+        if not permitted('financial.view'):
+            abort(403)
+        form = request.form
+        selections = []
+        missing = 0
+        for value in dict.fromkeys(form.getlist('voucher')):
+            if not value.isdigit():
+                continue
+            client = form.get(f'client_{value}', '')
+            if not client.isdigit():
+                missing += 1
+                continue
+            selections.append((int(value), int(client), form.get(f'hash_{value}', '')))
+        back = dict(balance_q=form.get('balance_q', '')[:200],
+                    balance_reason=form.get('balance_reason', ''),
+                    balance_size=form.get('balance_size', ''),
+                    balance_bulk=form.get('balance_bulk', ''))
+        back = {key: value for key, value in back.items() if value}
+        if missing:
+            flash(f'{missing} selected voucher{"s have" if missing != 1 else " has"} no client '
+                  'profile chosen. Choose a profile for every selected row.', 'error')
+            return redirect(url_for('data_review', **back, _anchor='balance-review'), code=303)
+        try:
+            result = reconciliation.bulk_confirm(database(), selections, form.get('basis', ''),
+                actor=g.current_user.get('username') or g.current_user.get('display_name', ''))
+        except clients.CRMError as error:
+            flash(str(error), 'error')
+            return redirect(url_for('data_review', **back, _anchor='balance-review'), code=303)
+        if result['linked']:
+            count = len(result['linked'])
+            flash(f'{count} voucher{"s" if count != 1 else ""} confirmed and included in '
+                  'client balances.', 'success')
+        if result['failed']:
+            details = '; '.join(f"{item['label']}: {item['error']}" for item in result['failed'][:10])
+            more = len(result['failed']) - 10
+            flash(f'{len(result["failed"])} not confirmed. {details}' +
+                  (f'; and {more} more.' if more > 0 else ''), 'error')
+        return redirect(url_for('data_review', **back, _anchor='balance-review'), code=303)
 
     @app.post('/clients/<int:client_id>/supplier-receipts/<int:voucher_id>/confirm')
     def confirm_supplier_receipt(client_id, voucher_id):

@@ -29,10 +29,36 @@ REASONS = {
 }
 
 
-def report(engine, *, query='', reason='', page=1, page_size=50):
-    """Check every profile and orphan, showing exceptions for visible parties."""
-    if page < 1 or page_size < 1 or page_size > 200 or (reason and reason not in REASONS):
-        raise ValueError('Choose valid balance-review filters.')
+BULK_REASONS = {'unconfirmed_match', 'ambiguous_client', 'source_changed'}
+BULK_LIMIT = 200
+
+
+def _bulk_mapping(row, journal_lines):
+    """Decide whether a row may be confirmed from the bulk form, and to whom by default.
+
+    Only client-matching questions are bulk-approvable. Source data problems,
+    supplier receipts and mixed journals keep their individual review paths.
+    """
+    if row.get('supplier_candidates'):
+        return dict(eligible=False, note='Supplier receipt: use Include supplier receipt.')
+    if row['assigned_client_id'] is not None and 'source_changed' not in row['reasons']:
+        return dict(eligible=False, note='Already matched; the source data needs checking.')
+    if not row['client_ids']:
+        return dict(eligible=False, note='No profile to map to. Link the source party first.')
+    blocking = [value for value in row['reasons'] if value not in BULK_REASONS]
+    if blocking:
+        return dict(eligible=False, note='Fix the source data first: ' +
+                    ', '.join(value.replace('_', ' ') for value in blocking) + '.')
+    if row['endpoint'] == 'journalvoucher' and journal_lines.get(row['voucher_id'], 0) > 1:
+        return dict(eligible=False, note='Journal with several customer lines: review it individually.')
+    # A single exact candidate is preselected. Ambiguous names always need an explicit choice.
+    default = (row['client_ids'][0] if len(row['client_ids']) == 1 and
+               'ambiguous_client' not in row['reasons'] else None)
+    return dict(eligible=True, default_client_id=default, note='')
+
+
+def _review_rows(engine):
+    """Exception rows for visible parties, each with its bulk-approval mapping."""
     with engine.connect() as connection:
         clients = {row['id']: dict(row) for row in connection.execute(
             select(db.clients.c.id, db.clients.c.name)).mappings()}
@@ -57,12 +83,27 @@ def report(engine, *, query='', reason='', page=1, page_size=50):
         row['reasons'].append('supplier_receipt_review')
         if review['changed'] and 'source_changed' not in row['reasons']:
             row['reasons'].insert(0, 'source_changed')
+    journal_lines = {}
+    for row in rows:
+        if row['ledger_id'] is not None:
+            journal_lines[row['voucher_id']] = journal_lines.get(row['voucher_id'], 0) + 1
+    for row in rows:
+        row['bulk'] = _bulk_mapping(row, journal_lines)
+    return clients, latest_import, rows, evidence
+
+
+def report(engine, *, query='', reason='', page=1, page_size=50, bulk_only=False):
+    """Check every profile and orphan, showing exceptions for visible parties."""
+    if page < 1 or page_size < 1 or page_size > 200 or (reason and reason not in REASONS):
+        raise ValueError('Choose valid balance-review filters.')
+    clients, latest_import, rows, evidence = _review_rows(engine)
     issue_vouchers = {row['voucher_id'] for row in rows}
     affected = {value for row in rows for value in row['client_ids']}
     summary = dict(vouchers=len(issue_vouchers), entries=len(rows), clients=len(affected),
         journals=len({row['voucher_id'] for row in rows if row['endpoint'] == 'journalvoucher'}),
         stale=len({row['voucher_id'] for row in rows if 'source_changed' in row['reasons']}),
         unassigned=len({row['voucher_id'] for row in rows if row['assigned_client_id'] is None}),
+        bulk_ready=len({row['voucher_id'] for row in rows if row['bulk']['eligible']}),
         scanned=len(evidence.get('scanned', ())))
     needle = query.strip().casefold()
     filtered = []
@@ -70,6 +111,8 @@ def report(engine, *, query='', reason='', page=1, page_size=50):
         row['clients'] = [clients[value] for value in row['client_ids']]
         row['explanations'] = [REASONS[value] for value in row['reasons']]
         if reason and reason not in row['reasons']:
+            continue
+        if bulk_only and not row['bulk']['eligible']:
             continue
         searchable = ' '.join(str(row.get(key) or '') for key in (
             'company', 'endpoint', 'number', 'party')) + ' ' + ' '.join(
@@ -84,9 +127,63 @@ def report(engine, *, query='', reason='', page=1, page_size=50):
     ledger = ledger_reconciliation.report(engine)
     return dict(summary=summary, rows=filtered[(page - 1) * page_size:page * page_size],
         total=len(filtered), page=page, pages=pages, query=query, reason=reason,
+        page_size=page_size, bulk_only=bulk_only, bulk_limit=BULK_LIMIT,
         latest_import=latest_import,
         ledger_summary=ledger['summary'], ledger_batch=ledger['batch'],
         reasons=REASONS, checked_at=datetime.now(followups.timezone(engine)).strftime('%d %b %Y %H:%M %Z'))
+
+
+def bulk_confirm(engine, selections, basis, actor=''):
+    """Confirm several reviewed voucher-to-profile mappings in one action.
+
+    ``selections`` is a list of ``(voucher_id, client_id, source_hash)``. Each mapping is
+    rechecked against the current review: the voucher must still be bulk-eligible, the
+    profile must be one of its candidates, and the source must be unchanged since the
+    page was shown. Every voucher then goes through the normal single-voucher
+    confirmation, in its own transaction, so one refusal never blocks the others.
+    """
+    from . import clients as crm_clients
+    basis = crm_clients.required(basis, 'Review basis')
+    if not selections:
+        raise crm_clients.CRMError('Select at least one voucher and its client profile.')
+    if len(selections) > BULK_LIMIT:
+        raise crm_clients.CRMError(f'Approve at most {BULK_LIMIT} vouchers at a time.')
+    if actor:
+        basis = f'Bulk review by {actor}: {basis}'
+    current = {}
+    _, _, rows, _ = _review_rows(engine)
+    for row in rows:
+        current.setdefault(row['voucher_id'], row)
+    with engine.connect() as connection:
+        hashes = dict(connection.execute(select(source.vouchers.c.id,
+            source.vouchers.c.source_hash).where(source.vouchers.c.id.in_(
+                [voucher_id for voucher_id, _, _ in selections]))).all())
+    linked, failed = [], []
+    for voucher_id, client_id, source_hash in selections:
+        row = current.get(voucher_id)
+        label = f"{row['endpoint']} #{row['number'] or voucher_id}" if row else f'Voucher {voucher_id}'
+        if row is None:
+            failed.append(dict(voucher_id=voucher_id, label=label,
+                               error='No longer awaiting review.'))
+            continue
+        if not row['bulk']['eligible']:
+            failed.append(dict(voucher_id=voucher_id, label=label, error=row['bulk']['note']))
+            continue
+        if client_id not in row['client_ids']:
+            failed.append(dict(voucher_id=voucher_id, label=label,
+                               error='The chosen profile is not a candidate for this voucher.'))
+            continue
+        if not source_hash or hashes.get(voucher_id) != source_hash:
+            failed.append(dict(voucher_id=voucher_id, label=label,
+                               error='The source changed after this page was opened. Review it again.'))
+            continue
+        try:
+            crm_clients.link_voucher(engine, client_id, voucher_id, basis)
+        except crm_clients.CRMError as error:
+            failed.append(dict(voucher_id=voucher_id, label=label, error=str(error)))
+        else:
+            linked.append(dict(voucher_id=voucher_id, label=label, client_id=client_id))
+    return dict(linked=linked, failed=failed)
 
 
 def after_import(engine, run_id):
